@@ -1,9 +1,10 @@
-// backend/src/utils/cache.js
 import redis from '../config/db.js';
 
 const TOKEN_KEY = 'user_tokens';
+const GEMINI_CACHE_PREFIX = 'gemini-analysis:';
+const GEMINI_CACHE_TTL_SECONDS = 60 * 60 * 24 * 7; // Cache Gemini results for 7 days
 
-// Store tokens (Remains the same)
+// Store tokens
 export const storeTokens = async (tokens) => {
     try {
         const tokensString = JSON.stringify(tokens);
@@ -15,7 +16,7 @@ export const storeTokens = async (tokens) => {
     }
 };
 
-// Retrieve tokens (Updated Logic)
+// Retrieve tokens
 export const getTokens = async () => {
     try {
         const retrievedValue = await redis.get(TOKEN_KEY);
@@ -25,48 +26,48 @@ export const getTokens = async () => {
             return null;
         }
 
-        // Add detailed logging to understand what's happening
         console.log(`Raw value retrieved for key ${TOKEN_KEY}:`, retrievedValue);
         const valueType = typeof retrievedValue;
         console.log(`Type of retrieved value: ${valueType}`);
 
         let tokens;
         if (valueType === 'string') {
-            // This is the EXPECTED path
             console.log('Retrieved value is a string, attempting JSON.parse...');
             try {
                 tokens = JSON.parse(retrievedValue);
             } catch (parseError) {
-                console.error(`Failed to parse retrieved string: ${parseError}. String was:`, retrievedValue);
-                throw parseError; // Re-throw the parsing error
+                console.error(
+                    `Failed to parse retrieved string: ${parseError}. String was:`,
+                    retrievedValue
+                );
+                throw parseError;
             }
         } else if (valueType === 'object' && retrievedValue !== null) {
-            // This is the UNEXPECTED path, handling the client's strange behavior
-            console.warn(`Retrieved value is already an object (type: ${valueType}). Using directly. Check @upstash/redis client behavior.`);
-            tokens = retrievedValue; // Use the object directly
+            console.warn(
+                `Retrieved value is already an object (type: ${valueType}). Using directly. Check @upstash/redis client behavior.`
+            );
+            tokens = retrievedValue;
         } else {
-            // Handle other unexpected types
-            console.error(`Unexpected type ('${valueType}') retrieved from cache for key ${TOKEN_KEY}. Value:`, retrievedValue);
-            return null; // Cannot process this type
-        }
-
-        // Optional: Add a check to ensure the final 'tokens' object looks valid
-        if (!tokens || typeof tokens.access_token === 'undefined') {
-            console.error("Processed tokens object seems invalid:", tokens);
+            console.error(
+                `Unexpected type ('${valueType}') retrieved from cache for key ${TOKEN_KEY}. Value:`,
+                retrievedValue
+            );
             return null;
         }
 
-        return tokens; // Return the processed tokens object
+        if (!tokens || typeof tokens.access_token === 'undefined') {
+            console.error('Processed tokens object seems invalid:', tokens);
+            return null;
+        }
 
+        return tokens;
     } catch (error) {
-        // Keep existing error handling, but the specific parse error should be caught above now
         console.error(`Error retrieving/processing tokens for key ${TOKEN_KEY}:`, error);
-        // No need to re-log SyntaxError specifically here if handled above
-        return null; // Return null on error
+        return null;
     }
 };
 
-// Clear tokens (Remains the same)
+// Clear tokens
 export const clearTokens = async () => {
     try {
         const result = await redis.del(TOKEN_KEY);
@@ -74,5 +75,57 @@ export const clearTokens = async () => {
     } catch (error) {
         console.error(`Error clearing tokens for key ${TOKEN_KEY}:`, error);
         throw error;
+    }
+};
+
+/**
+ * Retrieves cached Gemini analysis for a query.
+ * @param {string} query The search query.
+ * @returns {Promise<object | null>} The cached analysis object or null if not found/error.
+ */
+export const getGeminiAnalysis = async (query) => {
+    if (!redis || !query) return null;
+    const cacheKey = `${GEMINI_CACHE_PREFIX}${query}`;
+    try {
+        const cachedDataString = await redis.get(cacheKey);
+        if (cachedDataString) {
+            console.log(`getGeminiAnalysis: Cache HIT for key: ${cacheKey}`);
+            if (typeof cachedDataString === 'object') {
+                console.warn(
+                    `getGeminiAnalysis: Retrieved value is already an object for key ${cacheKey}. Using directly.`
+                );
+                return cachedDataString;
+            }
+            return JSON.parse(cachedDataString);
+        }
+        console.log(`getGeminiAnalysis: Cache MISS for key: ${cacheKey}`);
+        return null;
+    } catch (error) {
+        console.error(`Error retrieving Gemini analysis from cache for key ${cacheKey}:`, error);
+        if (error instanceof SyntaxError) {
+            try {
+                await redis.del(cacheKey);
+            } catch (delErr) {
+                console.error(`Failed to delete corrupted cache key ${cacheKey}`, delErr);
+            }
+        }
+        return null;
+    }
+};
+
+/**
+ * Stores Gemini analysis in the cache.
+ * @param {string} query The search query.
+ * @param {object} analysis The analysis object ({ intent, category }).
+ */
+export const storeGeminiAnalysis = async (query, analysis) => {
+    if (!redis || !query || !analysis || typeof analysis !== 'object') return;
+    const cacheKey = `${GEMINI_CACHE_PREFIX}${query}`;
+    try {
+        const analysisString = JSON.stringify(analysis);
+        await redis.set(cacheKey, analysisString, { ex: GEMINI_CACHE_TTL_SECONDS });
+        console.log(`storeGeminiAnalysis: Stored analysis in cache for key: ${cacheKey}`);
+    } catch (error) {
+        console.error(`Error storing Gemini analysis in cache for key ${cacheKey}:`, error);
     }
 };

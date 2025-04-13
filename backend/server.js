@@ -4,6 +4,9 @@ import dotenv from 'dotenv';
 import cors from 'cors';
 import authRoutes from './src/routes/auth.js';
 import gscRoutes from './src/routes/gsc.js'; // Import GSC routes
+
+import geminiRoutes from './src/routes/gemini.js'; // Import Gemini routes
+
 // import geminiRoutes from './src/routes/gemini.js'; // Add later
 
 dotenv.config();
@@ -20,7 +23,9 @@ app.use(express.json());
 // Routes
 app.use('/auth', authRoutes);
 app.use('/gsc', gscRoutes); // Use GSC routes
-// app.use('/gemini', geminiRoutes); // Add later
+
+app.use('/gemini', geminiRoutes); // Use Gemini routes
+
 
 app.get('/', (req, res) => {
     res.send('Custom Report Builder Backend is running!');
