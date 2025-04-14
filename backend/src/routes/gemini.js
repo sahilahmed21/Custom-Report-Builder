@@ -1,20 +1,27 @@
 // backend/src/routes/gemini.js
 import express from 'express';
 import {
-    analyzeIntentsProgressive, // Renamed/New trigger
-    getAnalysisJobStatus,      // New status endpoint
-    getAnalysisResultsBatch    // New results endpoint
+    analyzeIntentsProgressive, // Renamed function for clarity
+    getAnalysisJobStatus,
+    getAnalysisResultsBatch
 } from '../controllers/geminiController.js';
+// Potentially add middleware for authentication/authorization if needed later
 
 const router = express.Router();
 
-// Route to START the progressive analysis and get a Job ID
+// POST endpoint to start the progressive analysis job
+// Receives { queryData: [{ query, clicks }] }
+// Returns { jobId } with status 202
 router.post('/analyze-progressive', analyzeIntentsProgressive);
 
-// Route to get the status (progress) of an analysis job
+// GET endpoint to poll for job status
+// Uses job ID from URL parameter
+// Returns { progress: { total, completed, status, error? } }
 router.get('/job-status/:jobId', getAnalysisJobStatus);
 
-// Route to get the actual analysis results for a batch of queries (checks cache)
+// POST endpoint to fetch available results from cache
+// Receives { queries: string[] }
+// Returns { query1: { intent, category }, query2: { intent, category }, ... }
 router.post('/get-analysis-batch', getAnalysisResultsBatch);
 
 export default router;

@@ -51,20 +51,27 @@ export const oauthCallback = async (req, res) => {
     }
 };
 
-// --- Check Authentication Status ---
+// backend/src/controllers/authController.js
 export const checkAuthStatus = async (req, res) => {
+    console.log("Backend: /auth/status endpoint hit"); // Add this
     try {
         const tokens = await getTokens();
+        console.log("Backend: /auth/status - Received tokens:", tokens); // Add this
+
         if (tokens && tokens.access_token) {
+            console.log("Backend: /auth/status - Sending isAuthenticated: true"); // Add this
             res.status(200).json({ isAuthenticated: true });
         } else {
+            console.log("Backend: /auth/status - Sending isAuthenticated: false"); // Add this
             res.status(200).json({ isAuthenticated: false });
         }
     } catch (error) {
-        console.error('Error checking auth status:', error);
-        res.status(500).json({
+        // Log the specific error that occurred HERE
+        console.error('Backend: CRITICAL ERROR in checkAuthStatus:', error); // Add this
+        res.status(500).json({ // Ensure JSON is sent even on error
             isAuthenticated: false,
-            error: 'Internal server error',
+            error: 'Internal server error checking auth status',
+            details: error.message // Optionally include details (careful with sensitive info)
         });
     }
 };
