@@ -18,7 +18,12 @@
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
     "googleapis": "^148.0.0",
-    "redis": "^4.7.0"
+    "p-limit": "^6.2.0",
+    "redis": "^4.7.0",
+    "uuid": "^11.1.0"
   },
-  "description": ""
+  "description": "",
+  "devDependencies": {
+    "@types/uuid": "^10.0.0"
+  }
 }

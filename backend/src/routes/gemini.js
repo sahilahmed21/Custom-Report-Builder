@@ -1,13 +1,20 @@
 // backend/src/routes/gemini.js
 import express from 'express';
-import { analyzeIntents } from '../controllers/geminiController.js';
-// import { authMiddleware } from '../middleware/authMiddleware.js'; // Consider adding auth later if needed
+import {
+    analyzeIntentsProgressive, // Renamed/New trigger
+    getAnalysisJobStatus,      // New status endpoint
+    getAnalysisResultsBatch    // New results endpoint
+} from '../controllers/geminiController.js';
 
 const router = express.Router();
 
-// Route to analyze intents for a list of queries
-// POST because we are sending a body and potentially modifying cache state
-// Might add authMiddleware later to ensure only logged-in users can use it
-router.post('/analyze', analyzeIntents);
+// Route to START the progressive analysis and get a Job ID
+router.post('/analyze-progressive', analyzeIntentsProgressive);
+
+// Route to get the status (progress) of an analysis job
+router.get('/job-status/:jobId', getAnalysisJobStatus);
+
+// Route to get the actual analysis results for a batch of queries (checks cache)
+router.post('/get-analysis-batch', getAnalysisResultsBatch);
 
 export default router;

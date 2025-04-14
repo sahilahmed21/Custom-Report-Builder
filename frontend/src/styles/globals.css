@@ -1,54 +1,73 @@
-/* frontend/src/styles/globals.css */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* Keep the Shadcn UI theme variables */
+/* Power BI Inspired Theme */
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 0 0% 3.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 0 0% 3.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 3.9%;
-    --primary: 0 0% 9%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 0 0% 96.1%;
-    --secondary-foreground: 0 0% 9%;
-    --muted: 0 0% 96.1%;
-    --muted-foreground: 0 0% 45.1%;
-    --accent: 0 0% 96.1%;
-    --accent-foreground: 0 0% 9%;
-    --destructive: 0 84.2% 60.2%;
+    /* Power BI Inspired Palette (Light Mode) */
+    --background: 0 0% 98%; /* Slightly off-white background */
+    --foreground: 217 70% 15%; /* Dark blue-ish foreground */
+
+    --card: 0 0% 100%; /* White cards */
+    --card-foreground: 217 70% 15%; /* Dark blue text on cards */
+
+    --popover: 0 0% 100%; /* White popovers */
+    --popover-foreground: 217 70% 15%;
+
+    --primary: 217 70% 20%; /* Dark Blue (#0F2E56) */
+    --primary-foreground: 0 0% 98%; /* White text on primary */
+
+    --secondary: 217 91% 95%; /* Very light blue for secondary elements */
+    --secondary-foreground: 217 70% 25%; /* Darker blue text for secondary */
+
+    --muted: 0 0% 94%; /* Light gray for muted elements */
+    --muted-foreground: 0 0% 45%; /* Darker gray text */
+
+    --accent: 217 91% 60%; /* Medium Blue (#3B82F6) for accents */
+    --accent-foreground: 0 0% 100%; /* White text on accent */
+
+    --destructive: 0 84.2% 60.2%; /* Default red */
     --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 89.8%;
-    --input: 0 0% 89.8%;
-    --ring: 0 0% 3.9%;
-    /* Removed duplicate chart variables if already defined via theme */
+
+    --border: 0 0% 88%; /* Slightly darker gray border */
+    --input: 0 0% 88%; /* Input border matches border */
+    --ring: 217 91% 60%; /* Medium Blue ring for focus */
+
     --radius: 0.5rem;
   }
+
   .dark {
-    --background: 0 0% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 0 0% 3.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 0 0% 3.9%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 0 0% 9%;
-    --secondary: 0 0% 14.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 0 0% 14.9%;
+    /* Power BI Inspired Palette (Dark Mode) */
+    --background: 217 70% 10%; /* Very dark blue background */
+    --foreground: 0 0% 95%; /* Light text */
+
+    --card: 217 70% 15%; /* Slightly lighter dark blue for cards */
+    --card-foreground: 0 0% 95%;
+
+    --popover: 217 70% 10%;
+    --popover-foreground: 0 0% 95%;
+
+    --primary: 217 91% 60%; /* Medium Blue as primary in dark */
+    --primary-foreground: 217 70% 10%; /* Dark text on primary */
+
+    --secondary: 217 70% 25%; /* Darker blue for secondary */
+    --secondary-foreground: 0 0% 95%;
+
+    --muted: 217 70% 20%; /* Muted dark blue */
     --muted-foreground: 0 0% 63.9%;
-    --accent: 0 0% 14.9%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 14.9%;
-    --input: 0 0% 14.9%;
-    --ring: 0 0% 83.1%;
-    /* Removed duplicate chart variables if already defined via theme */
+
+    --accent: 217 91% 70%; /* Slightly lighter Medium Blue for dark accents */
+    --accent-foreground: 217 70% 10%;
+
+    --destructive: 0 70% 50%; /* Darker red */
+    --destructive-foreground: 0 0% 95%;
+
+    --border: 217 70% 25%; /* Border color */
+    --input: 217 70% 25%;
+    --ring: 217 91% 70%; /* Accent color for ring */
+
+    --radius: 0.5rem;
   }
 }
 
@@ -59,6 +78,7 @@
   }
   body {
     @apply bg-background text-foreground;
-    /* Let --font-sans from layout/tailwind config handle font */
+    /* Font applied via layout/tailwind config */
+    font-feature-settings: "rlig" 1, "calt" 1;
   }
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Head from 'next/head';
 import AuthButton from '../components/AuthButton';
 import { useReportConfig } from '../hooks/useReportConfig ';
@@ -9,11 +9,25 @@ import { DroppableArea } from '../components/DroppableArea';
 import { TimeRangeSelector } from '../components/TimeRangeSelector';
 import { PropertySelector } from '../components/PropertySelector';
 import { ReportTable } from '../components/ReportTable';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { getDateRange } from '../utils/dateUtils';
+import { Metric, GscProperty, ReportRow } from '../types';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Skeleton } from '@/components/ui/skeleton';
 import { Separator } from '@/components/ui/separator';
-import { X } from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Progress } from '@/components/ui/progress';
+import { Input } from '@/components/ui/input';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuLabel,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { X, AlertCircle, Download, Settings2, BarChartHorizontalBig } from 'lucide-react';
 import {
     DndContext,
     KeyboardSensor,
@@ -23,27 +37,35 @@ import {
     closestCenter,
     DragEndEvent,
 } from '@dnd-kit/core';
-import { Metric, GscProperty, ReportRow } from '../types';
-import { getDateRange } from '../utils/dateUtils';
+
+// --- Constants ---
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || '';
+const POLLING_INTERVAL_MS = 5000; // Poll every 5 seconds
 
 export default function Home() {
-    // --- Auth State ---
+    // --- States ---
     const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
     const [isLoadingAuth, setIsLoadingAuth] = useState<boolean>(true);
-    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL;
-
-    // --- GSC Property State ---
     const [gscProperties, setGscProperties] = useState<GscProperty[]>([]);
     const [selectedProperty, setSelectedProperty] = useState<string | null>(null);
     const [isLoadingProperties, setIsLoadingProperties] = useState<boolean>(false);
     const [propertyError, setPropertyError] = useState<string | null>(null);
 
-    // --- Report Data State ---
-    const [reportData, setReportData] = useState<ReportRow[] | null>(null);
+    // Report Data States
+    const [rawGscData, setRawGscData] = useState<ReportRow[] | null>(null);
+    const [displayData, setDisplayData] = useState<ReportRow[]>([]);
     const [isLoadingReport, setIsLoadingReport] = useState<boolean>(false);
     const [reportError, setReportError] = useState<string | null>(null);
+    const [reportFilter, setReportFilter] = useState<string>('');
 
-    // --- Report Config Hook ---
+    // Job Tracking States
+    const [analysisJobId, setAnalysisJobId] = useState<string | null>(null);
+    const [jobProgress, setJobProgress] = useState<{ total: number; completed: number; status: string } | null>(null);
+    const [analyzedResultsMap, setAnalyzedResultsMap] = useState<Map<string, { intent: string; category: string }>>(
+        new Map()
+    );
+
+    // --- Hooks and Constants ---
     const {
         availableMetrics,
         selectedMetrics,
@@ -53,54 +75,46 @@ export default function Home() {
         handleDragEnd: handleDragEndFromHook,
         removeSelectedMetric,
     } = useReportConfig();
+    const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor));
+    const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-    // Fetch GSC Properties function
+    // --- API Calls ---
     const fetchProperties = useCallback(async () => {
-        if (!backendUrl) return;
+        if (!BACKEND_URL || !isAuthenticated) return;
         setIsLoadingProperties(true);
         setPropertyError(null);
         try {
-            const response = await fetch(`${backendUrl}/gsc/properties`);
+            const response = await fetch(`${BACKEND_URL}/gsc/properties`);
             if (!response.ok) {
                 const errorData = await response.json();
-                throw new Error(errorData.error || `Failed to fetch properties: ${response.statusText}`);
+                throw new Error(errorData.error || `Failed properties fetch: ${response.statusText}`);
             }
             const data: GscProperty[] = await response.json();
             setGscProperties(data);
         } catch (error: any) {
             console.error('Error fetching GSC properties:', error);
-            setPropertyError(error.message || 'An unknown error occurred while fetching properties.');
+            setPropertyError(error.message || 'Unknown error fetching properties.');
         } finally {
             setIsLoadingProperties(false);
         }
-    }, [backendUrl]);
+    }, [BACKEND_URL, isAuthenticated]);
 
-    // Effect for Authentication
+    // --- Auth Effects ---
     useEffect(() => {
         const checkAuth = async () => {
+            if (!BACKEND_URL) {
+                console.error('Backend URL missing.');
+                setIsLoadingAuth(false);
+                return;
+            }
             setIsLoadingAuth(true);
             try {
-                const response = await fetch(`${backendUrl}/auth/status`);
-                if (response.ok) {
-                    const data = await response.json();
-                    setIsAuthenticated(data.isAuthenticated);
-                    if (data.isAuthenticated) {
-                        fetchProperties();
-                    } else {
-                        setGscProperties([]);
-                        setSelectedProperty(null);
-                    }
-                } else {
-                    console.error('Failed to fetch auth status:', response.statusText);
-                    setIsAuthenticated(false);
-                    setGscProperties([]);
-                    setSelectedProperty(null);
-                }
+                const response = await fetch(`${BACKEND_URL}/auth/status`);
+                const data = await response.json();
+                setIsAuthenticated(data.isAuthenticated);
             } catch (error) {
                 console.error('Error checking auth status:', error);
                 setIsAuthenticated(false);
-                setGscProperties([]);
-                setSelectedProperty(null);
             } finally {
                 setIsLoadingAuth(false);
             }
@@ -111,286 +125,501 @@ export default function Home() {
         if (authStatus === 'success') {
             setIsAuthenticated(true);
             setIsLoadingAuth(false);
-            fetchProperties();
             window.history.replaceState({}, document.title, window.location.pathname);
         } else if (authStatus === 'error') {
             setIsAuthenticated(false);
             setIsLoadingAuth(false);
             const message = queryParams.get('message');
-            alert(`Authentication failed: ${message || 'Unknown error'}`);
+            setReportError(`Authentication failed: ${message || 'Unknown error'}`);
             window.history.replaceState({}, document.title, window.location.pathname);
         } else {
             checkAuth();
         }
-    }, [backendUrl, fetchProperties]);
+    }, [BACKEND_URL]);
 
-    // Handle Logout
+    useEffect(() => {
+        if (isAuthenticated) {
+            fetchProperties();
+        } else {
+            setGscProperties([]);
+            setSelectedProperty(null);
+            setPropertyError(null);
+            setRawGscData(null);
+            setDisplayData([]);
+            setAnalysisJobId(null);
+            setJobProgress(null);
+            setAnalyzedResultsMap(new Map());
+        }
+    }, [isAuthenticated, fetchProperties]);
+
+    // --- Polling Effect ---
+    useEffect(() => {
+        const fetchJobStatus = async () => {
+            if (!analysisJobId || !BACKEND_URL) return;
+
+            console.log(`Polling job status for ${analysisJobId}...`);
+            try {
+                const response = await fetch(`${BACKEND_URL}/gemini/job/${analysisJobId}`);
+                if (!response.ok) {
+                    console.error(`Error polling job ${analysisJobId}: ${response.status}`);
+                    setReportError(`Error fetching analysis progress (Status: ${response.status}).`);
+                    if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
+                    setAnalysisJobId(null);
+                    setIsLoadingReport(false);
+                    return;
+                }
+                const data = await response.json();
+                console.log('Job status received:', data);
+
+                setJobProgress({ total: data.total, completed: data.completed, status: data.status });
+
+                if (data.results && typeof data.results === 'object') {
+                    setAnalyzedResultsMap(new Map(Object.entries(data.results)));
+                }
+
+                if (data.status === 'Completed' || data.status === 'Failed') {
+                    console.log(`Job ${analysisJobId} finished with status: ${data.status}`);
+                    if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
+                    setAnalysisJobId(null);
+                    setIsLoadingReport(false);
+                    if (data.status === 'Failed') {
+                        setReportError(`Analysis job failed: ${data.error || 'Unknown reason'}`);
+                    }
+                }
+            } catch (error: any) {
+                console.error('Polling error:', error);
+                setReportError(`Polling error: ${error.message}`);
+                if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
+                setAnalysisJobId(null);
+                setIsLoadingReport(false);
+            }
+        };
+
+        if (analysisJobId) {
+            if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
+            fetchJobStatus();
+            pollingIntervalRef.current = setInterval(fetchJobStatus, POLLING_INTERVAL_MS);
+        }
+
+        return () => {
+            if (pollingIntervalRef.current) {
+                clearInterval(pollingIntervalRef.current);
+                pollingIntervalRef.current = null;
+                console.log('Polling interval cleared.');
+            }
+        };
+    }, [analysisJobId, BACKEND_URL]);
+
+    // --- Effect to Derive displayData ---
+    useEffect(() => {
+        if (!rawGscData) {
+            setDisplayData([]);
+            return;
+        }
+
+        const newData = rawGscData
+            .filter((row) => row.query && analyzedResultsMap.has(row.query))
+            .map((row) => {
+                const analysis = analyzedResultsMap.get(row.query!);
+                return {
+                    ...row,
+                    geminiIntent: analysis?.intent ?? 'Error',
+                    geminiCategory: analysis?.category ?? 'Error',
+                    isSampled: true,
+                };
+            });
+
+        setDisplayData(newData);
+        console.log(`Derived displayData with ${newData.length} analyzed rows.`);
+    }, [rawGscData, analyzedResultsMap]);
+
+    // --- Handlers ---
     const handleLogout = async () => {
+        if (!BACKEND_URL) return;
+        if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
+        setAnalysisJobId(null);
+        setJobProgress(null);
+        setAnalyzedResultsMap(new Map());
+        setDisplayData([]);
         setIsLoadingAuth(true);
         try {
-            const response = await fetch(`${backendUrl}/auth/logout`, { method: 'POST' });
-            if (response.ok) {
-                setIsAuthenticated(false);
-                setGscProperties([]);
-                setSelectedProperty(null);
-                setReportData(null);
-                alert('Logged out successfully.');
-            } else {
-                const data = await response.json();
-                console.error('Logout failed:', data.error || response.statusText);
-                alert(`Logout failed: ${data.error || 'Please try again.'}`);
-            }
+            await fetch(`${BACKEND_URL}/auth/logout`, { method: 'POST' });
+            setIsAuthenticated(false);
+            setGscProperties([]);
+            setSelectedProperty(null);
+            setRawGscData(null);
+            setReportError(null);
+            setPropertyError(null);
         } catch (error) {
             console.error('Error during logout:', error);
-            alert('An error occurred during logout.');
+            setReportError('An error occurred during logout.');
         } finally {
             setIsLoadingAuth(false);
         }
     };
 
-    // DND Setup
     const handleDragEnd = (event: DragEndEvent) => handleDragEndFromHook(event);
-    const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor));
 
-    // Generate Report Function
     const handleGenerateReport = async () => {
-        if (!selectedProperty || selectedMetrics.length === 0 || isLoadingReport) {
-            console.log('Generate report preconditions not met or already loading.');
-            return;
-        }
-
-        setReportData(null);
+        if (!selectedProperty || selectedMetrics.length === 0 || isLoadingReport || !BACKEND_URL) return;
+        setRawGscData(null);
+        setDisplayData([]);
+        setAnalysisJobId(null);
+        setJobProgress(null);
+        setAnalyzedResultsMap(new Map());
+        if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
         setReportError(null);
+        setReportFilter('');
         setIsLoadingReport(true);
 
-        console.log('Generating report for:', selectedProperty);
-        console.log('Selected Metrics (for display):', selectedMetrics.map((m) => m.name));
-        console.log('Selected Time Range Value:', selectedTimeRange);
-
-        // Prepare Request
         const dateRange = getDateRange(selectedTimeRange);
-
         if (!dateRange) {
-            setReportError('Custom date range selection is not yet implemented.');
+            setReportError('Custom date range selection is not implemented.');
             setIsLoadingReport(false);
             return;
         }
 
-        const requestBody = {
+        const gscRequestBody = {
             siteUrl: selectedProperty,
             startDate: dateRange.startDate,
             endDate: dateRange.endDate,
             dimensions: ['query'],
         };
+        let gscDataRaw: ReportRow[] | null = null;
 
-        console.log('Calling backend /gsc/report with body:', requestBody);
-
-        // Call Backend
         try {
-            const response = await fetch(`${backendUrl}/gsc/report`, {
+            console.log('Calling backend /gsc/report:', gscRequestBody);
+            const gscResponse = await fetch(`${BACKEND_URL}/gsc/report`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(requestBody),
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(gscRequestBody),
             });
+            const gscResult = await gscResponse.json();
+            if (!gscResponse.ok) throw new Error(gscResult.error || `Failed GSC fetch: ${gscResponse.statusText}`);
 
-            const result = await response.json();
+            gscDataRaw = (gscResult as any[]).map((row) => ({
+                ...row,
+                query: row.keys?.[0],
+            })) as ReportRow[];
 
-            if (!response.ok) {
-                console.error('Backend error response:', result);
-                throw new Error(
-                    result.error || `Failed to fetch report: ${response.statusText} (Status: ${response.status})`
-                );
+            console.log(`GSC data received: ${gscDataRaw?.length ?? 0} rows`);
+            setRawGscData(gscDataRaw);
+
+            if (gscDataRaw && gscDataRaw.length > 0) {
+                const queryDataForAnalysis = gscDataRaw
+                    .map((row) => ({
+                        query: row.query ?? '',
+                        clicks: row.clicks,
+                        impressions: row.impressions,
+                    }))
+                    .filter((item) => item.query);
+
+                if (queryDataForAnalysis.length > 0) {
+                    console.log(`Calling backend /gemini/analyze-progressive for ${queryDataForAnalysis.length} queries.`);
+                    const startJobResponse = await fetch(`${BACKEND_URL}/gemini/analyze-progressive`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ queryData: queryDataForAnalysis }),
+                    });
+                    const startJobResult = await startJobResponse.json();
+                    if (!startJobResponse.ok)
+                        throw new Error(startJobResult.error || `Failed start analysis job: ${startJobResponse.statusText}`);
+
+                    console.log(`Analysis job started with ID: ${startJobResult.jobId}`);
+                    setAnalysisJobId(startJobResult.jobId);
+                } else {
+                    console.log('No valid queries to analyze.');
+                    setIsLoadingReport(false);
+                }
+            } else {
+                console.log('No GSC data fetched.');
+                setIsLoadingReport(false);
             }
-
-            console.log(`Report data received: ${result?.length ?? 0} rows`);
-            setReportData(result as ReportRow[]);
         } catch (error: any) {
-            console.error('Error fetching report:', error);
-            setReportError(error.message || 'An unknown error occurred while generating the report.');
-            setReportData(null);
-        } finally {
+            console.error('Error generating report:', error);
+            setReportError(error.message || 'An unknown error occurred.');
             setIsLoadingReport(false);
+            setRawGscData(null);
+            if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
+            setAnalysisJobId(null);
         }
     };
 
-    // Render Report Area
-    const renderReportArea = () => {
-        if (isLoadingReport) {
-            return (
-                <Card>
-                    <CardHeader>
-                        <CardTitle>Report Results</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-4 p-6">
-                        <Skeleton className="h-8 w-3/4" />
-                        <Skeleton className="h-4 w-full" />
-                        <Skeleton className="h-4 w-full" />
-                        <Skeleton className="h-4 w-5/6" />
-                        <Skeleton className="h-4 w-full" />
-                        <p className="text-center text-muted-foreground pt-4">Loading report data...</p>
-                    </CardContent>
-                </Card>
-            );
+    // --- Filtered Data ---
+    const filteredDisplayData = displayData.filter((row) => row.query?.toLowerCase().includes(reportFilter.toLowerCase())) ?? [];
+
+    // --- Render Functions ---
+    const renderProgress = () => {
+        if (!analysisJobId && !jobProgress) return null;
+
+        let progressValue = 0;
+        let progressText = 'Starting analysis...';
+        let statusVariant: 'default' | 'destructive' | 'warning' | 'success' = 'default';
+
+        if (jobProgress) {
+            progressValue = jobProgress.total > 0 ? (jobProgress.completed / jobProgress.total) * 100 : 0;
+            progressText = `${jobProgress.status}: ${jobProgress.completed} / ${jobProgress.total} queries analyzed.`;
+            if (jobProgress.status === 'Running') statusVariant = 'default';
+            if (jobProgress.status === 'Completed') {
+                statusVariant = 'success';
+                progressValue = 100;
+            }
+            if (jobProgress.status === 'Failed') statusVariant = 'destructive';
+            if (jobProgress.status === 'Pending') statusVariant = 'warning';
         }
-        if (reportError) {
-            return (
-                <Card className="border-destructive">
-                    <CardHeader>
-                        <CardTitle className="text-destructive">Report Error</CardTitle>
-                    </CardHeader>
-                    <CardContent className="p-6">
-                        <p>{reportError}</p>
-                        <p className="text-sm text-muted-foreground mt-2">
-                            Please check the console for details or try again.
-                        </p>
-                    </CardContent>
-                </Card>
-            );
-        }
-        if (reportData) {
-            return <ReportTable data={reportData} visibleMetrics={selectedMetrics} />;
-        }
+
         return (
-            <Card>
-                <CardHeader>
-                    <CardTitle>Report Results</CardTitle>
-                </CardHeader>
-                <CardContent className="p-6 text-center text-muted-foreground">
-                    Select metrics, a time range, and click "Generate Report".
-                </CardContent>
-            </Card>
+            <div className="my-4 space-y-2">
+                <Progress value={progressValue} className="w-full h-2" />
+                <p
+                    className={`text-sm text-center ${statusVariant === 'destructive'
+                        ? 'text-destructive'
+                        : statusVariant === 'success'
+                            ? 'text-green-600'
+                            : 'text-muted-foreground'
+                        }`}
+                >
+                    {progressText}
+                </p>
+            </div>
         );
     };
 
-    // Render Logic
-    const renderContent = () => {
+    const renderMainContent = () => {
         if (isLoadingAuth) {
-            return <p className="text-center pt-10">Loading authentication...</p>;
+            return (
+                <div className="text-center pt-10 text-muted-foreground">
+                    <Skeleton className="h-6 w-48 mx-auto" />
+                    <p className="mt-2">Verifying authentication...</p>
+                </div>
+            );
         }
         if (!isAuthenticated) {
             return (
-                <Card className="max-w-md mx-auto mt-10">
+                <Card className="max-w-md mx-auto mt-10 shadow-md">
                     <CardHeader>
-                        <CardTitle>Welcome!</CardTitle>
+                        <CardTitle className="text-center">Welcome!</CardTitle>
+                        <CardDescription className="text-center">
+                            Please log in with your Google account to access GSC data and build reports.
+                        </CardDescription>
                     </CardHeader>
-                    <CardContent>
-                        <p className="text-muted-foreground">
-                            Please log in using the button in the header to build your report.
-                        </p>
+                    <CardContent className="flex justify-center">
+                        <BarChartHorizontalBig className="w-16 h-16 text-muted-foreground" />
                     </CardContent>
                 </Card>
             );
         }
-        if (!selectedProperty) {
+        if (!selectedProperty && !propertyError) {
             return (
-                <PropertySelector
-                    properties={gscProperties}
-                    selectedProperty={selectedProperty}
-                    onSelectProperty={setSelectedProperty}
-                    isLoading={isLoadingProperties}
-                    error={propertyError}
-                />
+                <div className="container mx-auto max-w-2xl mt-8">
+                    <PropertySelector
+                        properties={gscProperties}
+                        selectedProperty={selectedProperty}
+                        onSelectProperty={setSelectedProperty}
+                        isLoading={isLoadingProperties}
+                        error={propertyError}
+                    />
+                </div>
+            );
+        }
+        if (propertyError) {
+            return (
+                <Alert variant="destructive" className="max-w-lg mx-auto mt-10">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertTitle>Error Loading Properties</AlertTitle>
+                    <AlertDescription>
+                        {propertyError} Please ensure the Search Console API is enabled and you granted access, or try logging out and back in.
+                    </AlertDescription>
+                </Alert>
             );
         }
 
         return (
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    {/* Column 1: Available Metrics & Time Range */}
-                    <div className="space-y-6">
-                        <Card>
+                <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 mt-6">
+                    {/* Column 1: Configuration Panel */}
+                    <div className="lg:col-span-1 space-y-6">
+                        <Card className="shadow-sm">
                             <CardHeader>
-                                <CardTitle>Available Metrics</CardTitle>
+                                <CardTitle className="text-base font-semibold flex items-center gap-2">
+                                    <Settings2 size={18} /> Report Configuration
+                                </CardTitle>
                             </CardHeader>
-                            <CardContent className="flex flex-wrap gap-2">
-                                {availableMetrics.map((metric: Metric) => (
-                                    <DraggableMetric
-                                        key={metric.id}
-                                        id={metric.id}
-                                        metric={metric}
-                                        origin="available"
+                            <CardContent className="space-y-4">
+                                <div>
+                                    <h3 className="text-sm font-medium mb-2">Available Metrics</h3>
+                                    <div className="flex flex-wrap gap-2 p-2 rounded-md border bg-muted/50 min-h-[50px]">
+                                        {availableMetrics.map((metric: Metric) => (
+                                            <TooltipProvider key={metric.id} delayDuration={100}>
+                                                <Tooltip>
+                                                    <TooltipTrigger>
+                                                        <DraggableMetric id={metric.id} metric={metric} origin="available" />
+                                                    </TooltipTrigger>
+                                                    <TooltipContent>
+                                                        <p>Drag to 'Selected Metrics'</p>
+                                                    </TooltipContent>
+                                                </Tooltip>
+                                            </TooltipProvider>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div>
+                                    <h3 className="text-sm font-medium mb-2">Time Range</h3>
+                                    <TimeRangeSelector
+                                        value={selectedTimeRange}
+                                        onChange={setSelectedTimeRange}
+                                        timeRanges={timeRanges}
                                     />
-                                ))}
+                                </div>
                             </CardContent>
                         </Card>
-                        <TimeRangeSelector
-                            value={selectedTimeRange}
-                            onChange={setSelectedTimeRange}
-                            timeRanges={timeRanges}
-                        />
-                        {/* TODO: Add Custom Date Picker conditionally if selectedTimeRange === 'CUSTOM' */}
                     </div>
 
-                    {/* Column 2: Selected Metrics & Report */}
-                    <div className="md:col-span-2 space-y-6">
+                    {/* Column 2: Drop Area & Report */}
+                    <div className="lg:col-span-3 space-y-6">
                         <DroppableArea id="selected-metrics-area" title="Selected Metrics">
                             {selectedMetrics.length > 0 ? (
-                                <div className="flex flex-wrap gap-2">
+                                <div className="flex flex-wrap gap-3 p-2 min-h-[40px]">
                                     {selectedMetrics.map((metric: Metric) => (
                                         <div key={metric.id} className="relative group">
-                                            <DraggableMetric
-                                                id={metric.id}
-                                                metric={metric}
-                                                origin="selected-metrics-area"
-                                            />
-                                            <button
+                                            <DraggableMetric id={metric.id} metric={metric} origin="selected-metrics-area" />
+                                            <Button
+                                                variant="destructive"
+                                                size="icon"
                                                 onClick={() => removeSelectedMetric(metric.id)}
-                                                className="absolute -top-1 -right-1 bg-destructive text-destructive-foreground rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                                                className="absolute -top-2 -right-2 w-4 h-4 rounded-full p-0 opacity-0 group-hover:opacity-100 transition-opacity focus:opacity-100"
                                                 aria-label={`Remove ${metric.name}`}
                                             >
-                                                <X size={12} />
-                                            </button>
+                                                <X size={10} />
+                                            </Button>
                                         </div>
                                     ))}
                                 </div>
-                            ) : null}
+                            ) : (
+                                <p className="text-sm text-muted-foreground text-center py-4">Drag metrics here</p>
+                            )}
                         </DroppableArea>
-                        <Separator />
-                        <div className="flex justify-end">
+                        <div className="flex justify-end items-center gap-4">
                             <Button
                                 onClick={handleGenerateReport}
-                                disabled={selectedMetrics.length === 0 || isLoadingReport || !selectedProperty}
+                                disabled={selectedMetrics.length === 0 || isLoadingReport || !selectedProperty || !!analysisJobId}
                             >
-                                {isLoadingReport ? 'Generating...' : 'Generate Report'}
+                                {isLoadingReport || analysisJobId ? 'Processing...' : 'Generate Report'}
                             </Button>
                         </div>
-                        <div className="mt-6">{renderReportArea()}</div>
-                        {/* TODO: Add Export buttons here later */}
+
+                        {renderProgress()}
+
+                        {reportError && !(isLoadingReport || analysisJobId) && (
+                            <Alert variant="destructive">
+                                <AlertCircle className="h-4 w-4" />
+                                <AlertTitle>Report Error</AlertTitle>
+                                <AlertDescription>
+                                    {reportError.split('\n').map((line, index) => (
+                                        <span key={index}>
+                                            {line}
+                                            <br />
+                                        </span>
+                                    ))}
+                                    Please check the console for details or try again.
+                                </AlertDescription>
+                            </Alert>
+                        )}
+
+                        <div className="mt-4">
+                            {isLoadingReport && displayData.length === 0 && !analysisJobId && (
+                                <Card>
+                                    <CardHeader>
+                                        <CardTitle>Report Results</CardTitle>
+                                    </CardHeader>
+                                    <CardContent className="space-y-4 p-6">
+                                        <Skeleton className="h-8 w-3/4" />
+                                        <Skeleton className="h-4 w-full" />
+                                        <Skeleton className="h-4 w-full" />
+                                        <Skeleton className="h-4 w-5/6" />
+                                        <Skeleton className="h-4 w-full" />
+                                    </CardContent>
+                                </Card>
+                            )}
+                            {(displayData.length > 0 || analysisJobId || (!isLoadingReport && !analysisJobId && rawGscData)) && (
+                                <>
+                                    <div className="flex items-center justify-between gap-4 mb-4">
+                                        <Input
+                                            placeholder="Filter analyzed queries..."
+                                            value={reportFilter}
+                                            onChange={(e) => setReportFilter(e.target.value)}
+                                            className="max-w-xs"
+                                            disabled={!displayData || displayData.length === 0}
+                                        />
+                                        <div className="flex items-center gap-2">
+                                            <DropdownMenu>
+                                                <DropdownMenuTrigger asChild>
+                                                    <Button variant="outline" size="sm" disabled={!displayData || displayData.length === 0}>
+                                                        <Download className="h-4 w-4 mr-2" />
+                                                        Export
+                                                    </Button>
+                                                </DropdownMenuTrigger>
+                                                <DropdownMenuContent>
+                                                    <DropdownMenuLabel>Export Options</DropdownMenuLabel>
+                                                    <DropdownMenuSeparator />
+                                                    <DropdownMenuItem disabled>Export as CSV (Coming Soon)</DropdownMenuItem>
+                                                    <DropdownMenuItem disabled>Export as JSON (Coming Soon)</DropdownMenuItem>
+                                                </DropdownMenuContent>
+                                            </DropdownMenu>
+                                            <Button variant="outline" size="sm" disabled={!rawGscData}>
+                                                <Download className="h-4 w-4 mr-2" />
+                                                Export All GSC ({rawGscData?.length ?? 0} rows)
+                                            </Button>
+                                            <Button variant="secondary" size="sm" disabled={!rawGscData}>
+                                                View All GSC Data
+                                            </Button>
+                                        </div>
+                                    </div>
+                                    <ReportTable data={filteredDisplayData} visibleMetrics={selectedMetrics} />
+                                    {displayData.length === 0 && analysisJobId && (
+                                        <p className="text-center text-muted-foreground mt-4">Waiting for first analysis results...</p>
+                                    )}
+                                </>
+                            )}
+                            {!isLoadingReport && !rawGscData && !reportError && !analysisJobId && (
+                                <Card>
+                                    <CardHeader>
+                                        <CardTitle>Report Results</CardTitle>
+                                    </CardHeader>
+                                    <CardContent className="p-6 text-center text-muted-foreground">
+                                        Configure your report options above and click "Generate Report".
+                                    </CardContent>
+                                </Card>
+                            )}
+                        </div>
                     </div>
                 </div>
             </DndContext>
         );
     };
 
+    // --- Final Render ---
     return (
-        <>
+        <TooltipProvider delayDuration={300}>
             <Head>
-                <title>Custom GSC Report Builder</title>
+                <title>Serprisingly - Custom Report Builder</title>
                 <link rel="icon" href="/favicon.ico" />
             </Head>
-            <div className="min-h-screen bg-background text-foreground">
-                <header className="flex justify-between items-center p-4 border-b">
-                    <h1 className="text-2xl font-semibold">Custom Report Builder</h1>
+            <div className="min-h-screen flex flex-col">
+                <header className="flex justify-between items-center p-4 border-b bg-primary text-primary-foreground shadow-sm sticky top-0 z-10">
+                    <h1 className="text-xl font-semibold">Serprisingly Report Builder</h1>
                     <div className="flex items-center gap-4">
-                        {selectedProperty && (
-                            <span className="text-sm text-muted-foreground hidden md:inline">
-                                Property: {selectedProperty}
-                            </span>
+                        {isAuthenticated && selectedProperty && (
+                            <span className="text-sm hidden md:inline opacity-80">Property: {selectedProperty}</span>
                         )}
-                        <AuthButton
-                            isAuthenticated={isAuthenticated}
-                            onLogout={handleLogout}
-                            isLoading={isLoadingAuth}
-                        />
+                        <AuthButton isAuthenticated={isAuthenticated} onLogout={handleLogout} isLoading={isLoadingAuth} />
                     </div>
                 </header>
-                <main className="p-4 md:p-8">{renderContent()}</main>
-                <footer className="mt-12 p-4 text-center text-muted-foreground text-sm border-t">
+                <main className="flex-grow container mx-auto px-4 py-6 md:px-6 md:py-8">{renderMainContent()}</main>
+                <footer className="mt-12 p-4 text-center text-muted-foreground text-xs border-t">
                     Powered by Next.js, Node.js, GSC API, and Gemini API
                 </footer>
             </div>
-        </>
+        </TooltipProvider>
     );
 }

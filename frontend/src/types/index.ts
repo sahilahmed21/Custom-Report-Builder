@@ -17,14 +17,15 @@ export interface GscProperty {
 
 // Interface for the report data rows (adapt based on actual GSC API response)
 export interface ReportRow {
-    keys: string[]; // e.g., ['best shoes'] - Contains the dimension values (Query)
+    keys?: string[]; // GSC API might return rows without keys in some cases
+    query?: string; // Added for easier access after mapping
     clicks: number;
     impressions: number;
     ctr: number;
     position: number;
-    // Add geminiCategory and geminiIntent later
     geminiCategory?: string;
     geminiIntent?: string;
+    isSampled?: boolean; // Flag to indicate if Gemini analysis was performed
 }
 
 // Add other shared types here

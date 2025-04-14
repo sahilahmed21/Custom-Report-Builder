@@ -18,7 +18,8 @@ app.use(cors({
     origin: process.env.FRONTEND_URL || 'http://localhost:3000',
     credentials: true
 }));
-app.use(express.json());
+app.use(express.json({ limit: '10mb' })); // Increase JSON payload limit
+app.use(express.urlencoded({ limit: '10mb', extended: true })); // Also increase for URL-encoded if needed
 
 // Routes
 app.use('/auth', authRoutes);
@@ -32,8 +33,14 @@ app.get('/', (req, res) => {
 });
 
 app.use((err, req, res, next) => {
-    console.error(err.stack);
-    res.status(500).send('Something broke!');
+    console.error("Unhandled Error:", err); // Log the actual error object
+    // Check for specific error types
+    if (err.type === 'entity.too.large') {
+        res.status(413).json({ error: 'Request payload is too large.' }); // Send specific 413 error
+    } else {
+        // Generic error response
+        res.status(err.status || 500).send('Something broke!'); // Keep generic message for others
+    }
 });
 
 app.listen(port, () => {

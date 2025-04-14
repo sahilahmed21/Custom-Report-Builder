@@ -19,7 +19,7 @@ let model;
 if (API_KEY) {
     genAI = new GoogleGenerativeAI(API_KEY);
     model = genAI.getGenerativeModel({
-        model: "gemini-pro", // Or consider "gemini-1.5-flash" for speed/cost if available/suitable
+        model: "gemini-1.5-flash", // Or consider "gemini-1.5-flash" for speed/cost if available/suitable
         // --- Safety Settings ---
         // Adjust these based on your content policies. Stricter settings might block more responses.
         safetySettings: [
@@ -106,7 +106,18 @@ export const analyzeQueryIntent = async (query) => {
         if (error.message && error.message.includes('response was blocked')) {
             return { intent: 'Blocked by Safety Filter', category: 'Blocked' };
         }
+        console.error(`analyzeQueryIntent: FAILED for query "${query}".`);
+        console.error('Gemini API Error Details:', error); // Log the full error object
+        // Log specific properties if available (error structure might vary)
+        if (error.response && error.response.data) {
+            console.error('Gemini API Response Data:', error.response.data);
+        }
+        if (error.message) {
+            console.error('Gemini API Error Message:', error.message);
+        }
+        // The existing return statement follows:
+        return { intent: 'API Error', category: 'API Error' };
+
         // Add more specific error handling (e.g., quota) if needed
-        return { intent: 'API Error', category: 'API Error' }; // Indicate generic API failure
     }
 };
