@@ -6,118 +6,113 @@ dotenv.config();
 
 // --- Configuration ---
 const API_KEY = process.env.GEMINI_API_KEY;
-if (!API_KEY) {
-    console.warn("Gemini API Key (GEMINI_API_KEY) not found in environment variables. Gemini service will be disabled.");
-    // Optionally throw an error if Gemini is critical:
-    // throw new Error("Gemini API Key is required.");
-}
-
 let genAI;
 let model;
 
-// Initialize only if API key exists
-if (API_KEY) {
+if (!API_KEY) {
+    console.warn("Gemini API Key (GEMINI_API_KEY) not found. Gemini service disabled.");
+} else {
     genAI = new GoogleGenerativeAI(API_KEY);
     model = genAI.getGenerativeModel({
-        model: "gemini-1.5-flash", // Or consider "gemini-1.5-flash" for speed/cost if available/suitable
-        // --- Safety Settings ---
-        // Adjust these based on your content policies. Stricter settings might block more responses.
+        model: "gemini-1.5-flash", // Or "gemini-pro"
         safetySettings: [
             { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
             { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
             { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
             { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
         ],
-        // --- Generation Config --- (Optional)
-        // generationConfig: {
-        //     temperature: 0.7, // Controls randomness (0=deterministic, 1=max random)
-        //     maxOutputTokens: 100, // Limit response length
-        // }
+        generationConfig: {
+            temperature: 0.2,
+        }
     });
-    console.log("Gemini Service: Initialized with model 'gemini-pro'.");
-} else {
-    console.log("Gemini Service: Not initialized due to missing API key.");
+    console.log("Gemini Service: Initialized with model and config.");
 }
 
-// --- Prompt Template ---
+// --- Updated Prompt Template ---
 const generatePrompt = (query) => `
-Analyze the user search intent and assign a primary category for the following search query.
+Analyze the user search intent and assign a primary content category for the following search query.
 
 Follow these instructions STRICTLY:
-1. Determine the most likely user intent (e.g., Find information, Compare products, Navigate to site, Purchase item, Learn how-to, Find location, Check status).
-2. Assign ONE primary category from this list: [Informational, Navigational, Transactional, Commercial Investigation, Local].
-3. Provide the response ONLY in valid JSON format with keys "intent" (string) and "category" (string). Do NOT include any other text, explanations, or markdown formatting.
-
+1. Determine the most likely user intent. Be concise and specific to the query's goal. Examples of intents include:
+   - Seek detailed instructions (e.g., "how to install a smart doorbell" → Learn step-by-step installation).
+   - Understand concepts or clarify information (e.g., "what is a 5ghz smart plug" → Grasp functionality or purpose).
+   - Evaluate options or recommendations (e.g., "best doorbell camera 2025" → Identify top-rated products).
+   - Verify specific facts or eligibility (e.g., "is ring alarm insurance approved uk" → Confirm insurance compatibility).
+   - Troubleshoot issues (e.g., "why won’t my smart plug connect" → Resolve connectivity problems).
+   - Compare products or features (e.g., "ring vs nest doorbell" → Assess differences between options).
+   - Seek inspiration or trends (e.g., "smart home ideas 2025" → Discover innovative setups).
+   - Locate resources or services (e.g., "smart lock installation near me" → Find local providers).
+   - Check status or updates (e.g., "latest ring firmware update" → Get current version details).
+2. Assign ONE primary content category from this list: [Guide, Explainer, Blog].
+   - Guide: Queries seeking step-by-step instructions or detailed procedures (e.g., "how to install a smart doorbell" → Intent: Learn step-by-step installation).
+   - Explainer: Queries asking for definitions, clarifications, or specific information (e.g., "is ring alarm insurance approved uk" → Intent: Confirm insurance compatibility).
+   - Blog: Queries looking for reviews, recommendations, or general discussions (e.g., "best doorbell camera" → Intent: Identify top-rated products).
+3. If intent is unclear, default to Blog.
+4. Provide the response ONLY in valid JSON format with keys "intent" (string) and "category" (string). Do NOT include any other text, explanations, or markdown formatting like \`\`\`json.
 Query: "${query}"
 
 JSON Response:
 `;
 
-
 /**
  * Analyzes a single search query using the Gemini API.
  * @param {string} query The search query to analyze.
- * @returns {Promise<{intent: string, category: string} | null>} Analysis object or null on error/disabled.
+ * @returns {Promise<{intent: string, category: string} | {intent: string, category: string, error: boolean}>} Analysis object or error object. Returns null if service disabled.
  */
 export const analyzeQueryIntent = async (query) => {
-    // Return null immediately if the service isn't initialized
     if (!model) {
-        console.warn("analyzeQueryIntent: Gemini service not initialized. Skipping analysis.");
-        return null;
+        console.warn("analyzeQueryIntent: Gemini service not initialized.");
+        return null; // Service disabled
     }
-    // Basic input validation
     if (!query || typeof query !== 'string' || query.trim().length === 0) {
         console.warn("analyzeQueryIntent: Invalid query provided.");
-        return null;
+        // Return an error structure consistent with other failures
+        return { intent: 'Invalid Query', category: 'Error', error: true };
     }
 
     const prompt = generatePrompt(query);
-    console.log(`analyzeQueryIntent: Analyzing query "${query}"`); // Be mindful of logging PII if queries are sensitive
+    // console.log(`analyzeQueryIntent: Analyzing query "${query}"`); // Reduce log noise
 
     try {
         const result = await model.generateContent(prompt);
         const response = await result.response;
-        const jsonText = response.text().trim();
 
-        console.log(`analyzeQueryIntent: Raw Gemini response for "${query}":`, jsonText); // Log raw response
+        // Check for safety blocks before accessing text()
+        if (!response || response.promptFeedback?.blockReason) {
+            const blockReason = response?.promptFeedback?.blockReason || 'Unknown';
+            const safetyRatings = response?.promptFeedback?.safetyRatings || [];
+            console.warn(`analyzeQueryIntent: Response blocked for query "${query}". Reason: ${blockReason}`, safetyRatings);
+            return { intent: 'Blocked by Safety Filter', category: 'Blocked', error: true, blockReason };
+        }
+
+        const jsonText = response.text().trim();
+        // console.log(`analyzeQueryIntent: Raw Gemini response for "${query}":`, jsonText); // Reduce log noise
 
         // Attempt to parse the JSON response
         try {
-            // Handle potential markdown code block ```json ... ```
             const cleanedJsonText = jsonText.replace(/^```json\s*|```$/g, '').trim();
             const analysis = JSON.parse(cleanedJsonText);
 
-            // Validate expected keys
             if (typeof analysis.intent === 'string' && typeof analysis.category === 'string') {
-                console.log(`analyzeQueryIntent: Successfully parsed analysis for "${query}":`, analysis);
-                return analysis;
+                // console.log(`analyzeQueryIntent: Successfully parsed analysis for "${query}"`); // Reduce log noise
+                return analysis; // Success
             } else {
-                console.error(`analyzeQueryIntent: Parsed JSON for "${query}" is missing required keys ('intent', 'category'). Parsed:`, analysis);
-                return { intent: 'Parsing Error', category: 'Parsing Error' }; // Return error object
+                console.error(`analyzeQueryIntent: Parsed JSON for "${query}" missing keys. Parsed:`, analysis);
+                return { intent: 'Parsing Error', category: 'Invalid Format', error: true };
             }
         } catch (parseError) {
-            console.error(`analyzeQueryIntent: Failed to parse JSON response from Gemini for query "${query}". Error: ${parseError}. Response Text:`, jsonText);
-            return { intent: 'Parsing Error', category: 'Parsing Error' }; // Indicate parsing failure
+            console.error(`analyzeQueryIntent: Failed to parse JSON response for query "${query}". Error: ${parseError}. Response Text:`, jsonText);
+            return { intent: 'Parsing Error', category: 'Invalid JSON', error: true };
         }
 
     } catch (error) {
         console.error(`analyzeQueryIntent: Error calling Gemini API for query "${query}":`, error.message || error);
-        // Check for specific safety blocks or other API errors
-        if (error.message && error.message.includes('response was blocked')) {
-            return { intent: 'Blocked by Safety Filter', category: 'Blocked' };
+        // Check for specific error types if possible (e.g., rate limit)
+        if (error.message && error.message.includes('429')) {
+            return { intent: 'API Error', category: 'Rate Limit', error: true };
         }
-        console.error(`analyzeQueryIntent: FAILED for query "${query}".`);
-        console.error('Gemini API Error Details:', error); // Log the full error object
-        // Log specific properties if available (error structure might vary)
-        if (error.response && error.response.data) {
-            console.error('Gemini API Response Data:', error.response.data);
-        }
-        if (error.message) {
-            console.error('Gemini API Error Message:', error.message);
-        }
-        // The existing return statement follows:
-        return { intent: 'API Error', category: 'API Error' };
-
-        // Add more specific error handling (e.g., quota) if needed
+        // Log full error for debugging if needed
+        // console.error('Gemini API Error Details:', error);
+        return { intent: 'API Error', category: 'Unknown', error: true }; // General API error
     }
 };

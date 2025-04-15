@@ -1,27 +1,29 @@
 // backend/src/routes/gemini.js
 import express from 'express';
 import {
-    analyzeIntentsProgressive, // Renamed function for clarity
-    getAnalysisJobStatus,
+    analyzeTopNHybrid,
+    getBackgroundJobProgress,
     getAnalysisResultsBatch
 } from '../controllers/geminiController.js';
-// Potentially add middleware for authentication/authorization if needed later
 
 const router = express.Router();
 
-// POST endpoint to start the progressive analysis job
-// Receives { queryData: [{ query, clicks }] }
-// Returns { jobId } with status 202
-router.post('/analyze-progressive', analyzeIntentsProgressive);
+// POST endpoint to start hybrid analysis (immediate + background)
+// Receives { topNQueries: string[] }
+// Returns { jobId, initialResults: { ... } } with status 202
+router.post('/analyze-top-n-hybrid', analyzeTopNHybrid);
 
-// GET endpoint to poll for job status
+// GET endpoint to poll for background job progress
 // Uses job ID from URL parameter
 // Returns { progress: { total, completed, status, error? } }
-router.get('/job-status/:jobId', getAnalysisJobStatus);
+router.get('/job-progress/:jobId', getBackgroundJobProgress);
 
-// POST endpoint to fetch available results from cache
+// POST endpoint to fetch available results from cache (for polling)
 // Receives { queries: string[] }
-// Returns { query1: { intent, category }, query2: { intent, category }, ... }
+// Returns { query1: { intent, category }, ... }
 router.post('/get-analysis-batch', getAnalysisResultsBatch);
+
+// Remove old synchronous batch route if present
+// router.post('/analyze-batch', analyzeBatchSynchronous);
 
 export default router;
