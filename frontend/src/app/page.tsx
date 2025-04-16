@@ -580,7 +580,6 @@ export default function Home() {
             };
         });
     }, [topNQueryData, analyzedResultsMap]);
-
     // --- Export Handlers ---
     const handleExportCsv = () => {
         if (!displayData || displayData.length === 0) {
@@ -663,7 +662,7 @@ export default function Home() {
             console.log("User authorized for Sheets API.");
 
             const headers = [
-                'Query', 'Category',
+                'Query',
                 ...selectedMetrics.map(m => m.name),
                 'Category (AI)', 'Intent (AI)'
             ];
@@ -671,7 +670,6 @@ export default function Home() {
             const values = displayData.map(row => {
                 const rowData = [
                     row.query ?? '',
-                    'N/A',
                 ];
                 selectedMetrics.forEach(m => {
                     const key = `${m.apiName}_${m.timePeriod}`;
@@ -750,7 +748,6 @@ export default function Home() {
             setIsExportingSheet(false);
         }
     };
-
     // --- Navigation to Full Report ---
     const handleViewFullData = () => {
         if (rawMergedGscData && rawMergedGscData.size > 0) {
@@ -808,9 +805,9 @@ export default function Home() {
 
         return (
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                     {/* LEFT SIDEBAR (Configuration) */}
-                    <div className="lg:col-span-2 space-y-6">
+                    <div className="lg:col-span-4 space-y-6">
                         <Card className="shadow-sm sticky top-[80px]">
                             <CardHeader>
                                 <CardTitle className="text-lg font-semibold flex items-center gap-2"><Settings2 size={20} /> Report Builder</CardTitle>
@@ -976,7 +973,7 @@ export default function Home() {
                     </div>
 
                     {/* RIGHT SIDEBAR (Details & Actions) */}
-                    <div className="lg:col-span-3 space-y-6">
+                    <div className="lg:col-span-4 space-y-6">
                         <div className="sticky top-[80px] space-y-6">
                             <Card>
                                 <CardHeader className="pb-2 pt-4">
