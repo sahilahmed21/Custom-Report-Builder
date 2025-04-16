@@ -104,6 +104,18 @@ type GapiError = {
     details?: string;
 };
 
+type FetchError = {
+    message: string;
+    status?: number;
+    details?: string;
+};
+
+type GapiErrorResponse = {
+    error: string;
+    details?: string;
+    status?: number;
+};
+
 export default function Home() {
     // --- Core States ---
     const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
@@ -164,7 +176,7 @@ export default function Home() {
         } finally {
             setIsLoadingProperties(false);
         }
-    }, [isAuthenticated]);
+    }, [isAuthenticated, selectedProperty]);
 
     // --- Effects ---
     // Detect Client-Side Rendering
@@ -1035,7 +1047,7 @@ export default function Home() {
     );
 }
 
-function isGapiError(error: unknown): error is GapiError {
+function isGapiError(error: unknown): error is GapiErrorResponse {
     return (
         typeof error === 'object' &&
         error !== null &&
