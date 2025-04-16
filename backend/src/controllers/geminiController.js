@@ -10,9 +10,9 @@ import pLimit from 'p-limit';
 import { v4 as uuidv4 } from 'uuid';
 
 // --- Configuration ---
-const IMMEDIATE_BATCH_SIZE = 20; // Number of queries to analyze synchronously first
-const GEMINI_CONCURRENCY_LIMIT = 1; // Keep at 1 for simplicity and rate limiting
-const THROTTLE_DELAY_MS = 5000; // 5 seconds delay between requests (keeps under 15 RPM)
+const IMMEDIATE_BATCH_SIZE = 10; // Number of queries to analyze synchronously first
+const GEMINI_CONCURRENCY_LIMIT = 2; // Keep at 1 for simplicity and rate limiting
+const THROTTLE_DELAY_MS = 3000; // 5 seconds delay between requests (keeps under 15 RPM)
 
 // --- Background Processing Function (Simulated with setTimeout) ---
 const processRemainingInBackground = async (jobId, backgroundQueries) => {

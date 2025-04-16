@@ -3,122 +3,145 @@
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import Head from 'next/head';
+import { useRouter } from 'next/navigation';
+import Papa from 'papaparse';
+import { saveAs } from 'file-saver';
+
+// UI Components
+import { CategoryDistributionChart } from '../components/CategoryDistributionChart';
 import AuthButton from '../components/AuthButton';
-import { useReportConfig } from '../hooks/useReportConfig ';
+import { PropertySelector } from '../components/PropertySelector';
 import { DraggableMetric } from '../components/DraggableMetric';
 import { DroppableArea } from '../components/DroppableArea';
-import { PropertySelector } from '../components/PropertySelector';
 import { ReportTable } from '../components/ReportTable';
-import { getDateRange } from '../utils/dateUtils';
-import { Metric, GscProperty, ReportRow, DisplayRow } from '../types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Progress } from '@/components/ui/progress';
 import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Progress } from '@/components/ui/progress';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuLabel,
-    DropdownMenuSeparator,
-    DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { X, Terminal, AlertCircle, Download, Settings2, BarChartHorizontalBig, Info } from 'lucide-react';
-import {
-    DndContext,
-    KeyboardSensor,
-    PointerSensor,
-    useSensor,
-    useSensors,
-    closestCenter,
-    DragEndEvent,
-} from '@dnd-kit/core';
-import { useRouter } from 'next/navigation';
+import { X, AlertCircle, Download, Settings2, BarChartHorizontalBig, Loader2, Filter, Search, ListChecks, Clock, BarChart3, FileSpreadsheet, Info, Globe } from 'lucide-react';
+import { DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors, closestCenter, DragEndEvent } from '@dnd-kit/core';
+
+// Hooks & Utils
+import { useReportConfig } from '../hooks/useReportConfig ';
+import { getDateRange } from '../utils/dateUtils';
+import { Metric, GscProperty, ReportRow, DisplayRow } from '../types';
+import { formatNumber } from '../utils/numberFormatting';
 
 // --- Constants ---
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || '';
+const DEFAULT_TOP_N = '100';
 const POLLING_INTERVAL_MS = 5000;
+const IMMEDIATE_BATCH_SIZE = 10;
+
+// --- Google API Config ---
+const GAPI_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '';
+const GAPI_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_API_KEY || '';
+const GAPI_SHEETS_SCOPE = 'https://www.googleapis.com/auth/spreadsheets';
+
+// Add TypeScript declarations for GAPI
+declare global {
+    interface Window {
+        gapi: any;
+    }
+}
 
 export default function Home() {
-    // --- States ---
+    // --- Core States ---
     const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
     const [isLoadingAuth, setIsLoadingAuth] = useState<boolean>(true);
     const [gscProperties, setGscProperties] = useState<GscProperty[]>([]);
     const [selectedProperty, setSelectedProperty] = useState<string | null>(null);
     const [isLoadingProperties, setIsLoadingProperties] = useState<boolean>(false);
     const [propertyError, setPropertyError] = useState<string | null>(null);
+    const [isClient, setIsClient] = useState(false);
+    const [isGapiLoaded, setIsGapiLoaded] = useState(false);
+    const [isGapiInitializing, setIsGapiInitializing] = useState(false);
+    const [isSheetsAuthorized, setIsSheetsAuthorized] = useState(false);
+    const [isExportingSheet, setIsExportingSheet] = useState(false);
+
+    // --- Report Generation States ---
     const [rawMergedGscData, setRawMergedGscData] = useState<Map<string, Partial<DisplayRow>> | null>(null);
+    const [topNQueryData, setTopNQueryData] = useState<Partial<DisplayRow>[]>([]);
+    const [analyzedResultsMap, setAnalyzedResultsMap] = useState<Map<string, { intent: string; category: string }>>(new Map());
     const [isLoadingReport, setIsLoadingReport] = useState<boolean>(false);
+    const [isAnalyzingBackground, setIsAnalyzingBackground] = useState<boolean>(false);
     const [reportError, setReportError] = useState<string | null>(null);
-    const [reportFilter, setReportFilter] = useState<string>('');
     const [loadingMessage, setLoadingMessage] = useState<string>('');
 
-    // --- Progressive Loading States ---
+    // --- Filtering & Config States ---
+    const [keywordFilter, setKeywordFilter] = useState<string>('');
+    const [topNCount, setTopNCount] = useState<string>(DEFAULT_TOP_N);
+
+    // --- Background Job States ---
     const [analysisJobId, setAnalysisJobId] = useState<string | null>(null);
     const [jobProgress, setJobProgress] = useState<{ total: number; completed: number; status: string; error?: string } | null>(null);
-    const [analyzedResultsMap, setAnalyzedResultsMap] = useState<Map<string, { intent: string; category: string }>>(new Map());
     const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
-    const router = useRouter();
 
     // --- Hooks ---
-    const {
-        availableMetrics,
-        selectedMetrics,
-        handleDragEnd: handleDragEndFromHook,
-        removeSelectedMetric,
-    } = useReportConfig();
+    const { availableMetrics, selectedMetrics, handleDragEnd: handleDragEndFromHook, removeSelectedMetric } = useReportConfig();
     const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor));
+    const router = useRouter();
 
-    // --- API Calls & Effects ---
+    // --- Memoized Fetch Properties ---
     const fetchProperties = useCallback(async () => {
         if (!isAuthenticated || !BACKEND_URL) return;
         setIsLoadingProperties(true);
         setPropertyError(null);
         try {
-            const response = await fetch(`${BACKEND_URL}/gsc/properties`, {
-                credentials: 'include',
-            });
-            if (!response.ok) throw new Error('Failed to fetch properties');
+            const response = await fetch(`${BACKEND_URL}/gsc/properties`, { credentials: 'include' });
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({ error: `HTTP error ${response.status}` }));
+                throw new Error(errorData.error || 'Failed to fetch properties');
+            }
             const data: GscProperty[] = await response.json();
             setGscProperties(data);
             if (data.length > 0 && !selectedProperty) {
                 setSelectedProperty(data[0].siteUrl);
+            } else if (data.length === 0) {
+                setPropertyError("No GSC properties found for this account.");
             }
         } catch (error: any) {
+            console.error('Error fetching properties:', error);
             setPropertyError(error.message || 'Failed to load properties');
         } finally {
             setIsLoadingProperties(false);
         }
     }, [BACKEND_URL, isAuthenticated, selectedProperty]);
 
+    // --- Effects ---
+    // Detect Client-Side Rendering
+    useEffect(() => {
+        setIsClient(true);
+    }, []);
+
+    // Auth Check
     useEffect(() => {
         const checkAuth = async () => {
-            setIsLoadingAuth(true); // Set loading true at the start
+            setIsLoadingAuth(true);
             try {
-                // THIS IS THE CRITICAL CALL AFTER REDIRECT
-                const response = await fetch(`${BACKEND_URL}/auth/status`, {
-                    credentials: 'include',
-                });
-                console.log('Auth check response status:', response.status); // ADD LOGGING
-                const data = await response.json(); // ADD LOGGING
-                console.log('Auth check response data:', data); // ADD LOGGING
-
-                // It relies on the BACKEND /auth/check responding correctly
-                setIsAuthenticated(response.ok && data.isAuthenticated); // Check response.ok AND the payload
+                const response = await fetch(`${BACKEND_URL}/auth/status`, { credentials: 'include' });
+                if (response.ok) {
+                    const data = await response.json();
+                    setIsAuthenticated(data.isAuthenticated);
+                } else {
+                    setIsAuthenticated(false);
+                }
             } catch (error) {
-                console.error('Auth check fetch error:', error); // ADD LOGGING
+                console.error('Auth check fetch error:', error);
                 setIsAuthenticated(false);
             } finally {
-                setIsLoadingAuth(false); // Set loading false at the end
+                setIsLoadingAuth(false);
             }
         };
         checkAuth();
     }, [BACKEND_URL]);
 
+    // Properties & Reset on Auth Change
     useEffect(() => {
         if (isAuthenticated) {
             fetchProperties();
@@ -126,71 +149,176 @@ export default function Home() {
             setGscProperties([]);
             setSelectedProperty(null);
             setRawMergedGscData(null);
+            setTopNQueryData([]);
+            setAnalyzedResultsMap(new Map());
+            setPropertyError(null);
+            setIsLoadingReport(false);
+            setIsAnalyzingBackground(false);
+            setReportError(null);
+            setLoadingMessage('');
             setAnalysisJobId(null);
             setJobProgress(null);
-            setAnalyzedResultsMap(new Map());
             if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
         }
     }, [isAuthenticated, fetchProperties]);
 
+    // Polling Effect for Background Job
     useEffect(() => {
-        if (!analysisJobId || !BACKEND_URL) return;
+        if (!analysisJobId || !isAnalyzingBackground || !BACKEND_URL) {
+            if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
+            return;
+        }
 
-        pollingIntervalRef.current = setInterval(async () => {
+        const pollStatusAndResults = async () => {
+            console.log(`[Job ${analysisJobId}] Polling status & results...`);
+            let currentStatus = 'running';
+            let shouldStopPolling = false;
+
             try {
-                const response = await fetch(`${BACKEND_URL}/gemini/job-status/${analysisJobId}`, {
-                    credentials: 'include',
-                });
-                if (!response.ok) throw new Error('Failed to fetch job status');
-                const progress = await response.json();
-                setJobProgress(progress);
-
-                if (progress.status === 'completed' || progress.status === 'failed') {
-                    if (progress.status === 'failed' && progress.error) {
-                        setReportError(progress.error);
-                    } else if (progress.results) {
-                        const newAnalysisMap = new Map<string, { intent: string; category: string }>();
-                        progress.results.forEach((item: any) => {
-                            newAnalysisMap.set(item.query, { intent: item.intent, category: item.category });
-                        });
-                        setAnalyzedResultsMap(newAnalysisMap);
+                // Fetch Job Progress
+                const statusResponse = await fetch(`${BACKEND_URL}/gemini/job-progress/${analysisJobId}`, { credentials: 'include' });
+                if (!statusResponse.ok) {
+                    if (statusResponse.status === 404) {
+                        console.warn(`[Job ${analysisJobId}] Job status 404. Assuming completed or expired.`);
+                        setReportError("Background analysis job not found. It might have finished or expired.");
+                        shouldStopPolling = true;
+                    } else {
+                        throw new Error(`Failed to fetch job status (${statusResponse.status})`);
                     }
-                    setIsLoadingReport(false);
-                    setLoadingMessage('');
+                } else {
+                    const statusData = await statusResponse.json();
+                    if (statusData && statusData.progress) {
+                        console.log(`[Job ${analysisJobId}] Received status:`, statusData.progress);
+                        setJobProgress(statusData.progress);
+                        currentStatus = statusData.progress.status;
+                        if (currentStatus === 'completed' || currentStatus === 'failed') {
+                            shouldStopPolling = true;
+                            if (currentStatus === 'failed') {
+                                setReportError(`Background analysis failed: ${statusData.progress.error || 'Unknown reason'}`);
+                            }
+                        }
+                    } else {
+                        console.warn(`[Job ${analysisJobId}] Invalid status data received.`);
+                    }
+                }
+
+                // Fetch Results Batch
+                const queriesToFetch = topNQueryData.map(item => item.query).filter(q => typeof q === 'string') as string[];
+                if (queriesToFetch.length > 0) {
+                    const resultsResponse = await fetch(`${BACKEND_URL}/gemini/get-analysis-batch`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ queries: queriesToFetch }),
+                        credentials: 'include',
+                    });
+                    if (resultsResponse.ok) {
+                        const resultsBatch = await resultsResponse.json();
+                        setAnalyzedResultsMap(prevMap => {
+                            const newMap = new Map(prevMap);
+                            let updatedCount = 0;
+                            Object.entries(resultsBatch).forEach(([query, analysis]) => {
+                                if (!newMap.has(query)) {
+                                    newMap.set(query, analysis as { intent: string; category: string });
+                                    updatedCount++;
+                                }
+                            });
+                            if (updatedCount > 0) console.log(`[Job ${analysisJobId}] Updated map with ${updatedCount} new results.`);
+                            return newMap;
+                        });
+                    } else {
+                        console.error(`[Job ${analysisJobId}] Failed to fetch results batch (${resultsResponse.status})`);
+                    }
+                }
+            } catch (error: any) {
+                console.error(`[Job ${analysisJobId}] Error during polling:`, error);
+                setReportError(error.message || 'Error checking analysis progress');
+                shouldStopPolling = true;
+            } finally {
+                if (shouldStopPolling) {
+                    console.log(`[Job ${analysisJobId}] Stopping polling.`);
+                    setIsAnalyzingBackground(false);
                     setAnalysisJobId(null);
                     if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
                 }
-            } catch (error: any) {
-                setReportError(error.message || 'Error checking analysis progress');
-                setIsLoadingReport(false);
-                setLoadingMessage('');
-                setAnalysisJobId(null);
-                if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
             }
-        }, POLLING_INTERVAL_MS);
+        };
+
+        pollStatusAndResults();
+        pollingIntervalRef.current = setInterval(pollStatusAndResults, POLLING_INTERVAL_MS);
 
         return () => {
-            if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
+            if (pollingIntervalRef.current) {
+                clearInterval(pollingIntervalRef.current);
+                console.log(`[Job ${analysisJobId}] Cleared polling interval on unmount/dependency change.`);
+            }
         };
-    }, [analysisJobId, BACKEND_URL]);
+    }, [analysisJobId, isAnalyzingBackground, BACKEND_URL, topNQueryData]);
+
+    // Effect to load Google API Client Library (Client-Side Only)
+    useEffect(() => {
+        if (!isClient || isGapiLoaded || isGapiInitializing) {
+            return;
+        }
+
+        if (!GAPI_CLIENT_ID) {
+            console.warn("Google Client ID for GAPI not found (NEXT_PUBLIC_GOOGLE_CLIENT_ID). Sheets export disabled.");
+            return;
+        }
+
+        setIsGapiInitializing(true);
+        console.log("Attempting to load GAPI client...");
+
+        const loadGapi = async () => {
+            try {
+                // Import and initialize GAPI
+                const gapi = await import('gapi-script').then(module => module.gapi);
+                window.gapi = gapi;
+
+                // Load client and auth2 libraries
+                await new Promise((resolve, reject) => {
+                    gapi.load('client:auth2', {
+                        callback: resolve,
+                        onerror: reject,
+                        timeout: 10000,
+                        ontimeout: reject
+                    });
+                });
+
+                // Initialize the client
+                await gapi.client.init({
+                    apiKey: GAPI_API_KEY,
+                    clientId: GAPI_CLIENT_ID,
+                    scope: GAPI_SHEETS_SCOPE,
+                    discoveryDocs: ['https://sheets.googleapis.com/$discovery/rest?version=v4']
+                });
+
+                console.log("GAPI client initialized successfully");
+                setIsGapiLoaded(true);
+
+                // Check if already authenticated
+                const googleAuth = gapi.auth2.getAuthInstance();
+                if (googleAuth?.isSignedIn?.get() &&
+                    googleAuth.currentUser?.get()?.hasGrantedScopes(GAPI_SHEETS_SCOPE)) {
+                    console.log("Sheets scope already granted.");
+                    setIsSheetsAuthorized(true);
+                }
+            } catch (error) {
+                console.error("Error loading GAPI:", error);
+                const errorMessage = error instanceof Error ? error.message : "Unknown error";
+                setReportError("Failed to load Google API client: " + errorMessage);
+            } finally {
+                setIsGapiInitializing(false);
+            }
+        };
+
+        loadGapi();
+    }, [isClient, isGapiLoaded, isGapiInitializing, GAPI_CLIENT_ID, GAPI_API_KEY]);
 
     // --- Handlers ---
     const handleLogout = async () => {
         try {
-            await fetch(`${BACKEND_URL}/auth/logout`, {
-                method: 'POST',
-                credentials: 'include',
-            });
+            await fetch(`${BACKEND_URL}/auth/logout`, { method: 'POST', credentials: 'include' });
             setIsAuthenticated(false);
-            setSelectedProperty(null);
-            setGscProperties([]);
-            setRawMergedGscData(null);
-            setAnalysisJobId(null);
-            setJobProgress(null);
-            setAnalyzedResultsMap(new Map());
-            setReportError(null);
-            setReportFilter('');
-            if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
         } catch (error) {
             console.error('Logout failed:', error);
         }
@@ -198,81 +326,60 @@ export default function Home() {
 
     const handleDragEnd = (event: DragEndEvent) => handleDragEndFromHook(event);
 
+    // --- Main Report Generation Logic ---
     const handleGenerateReport = async () => {
-        if (!selectedProperty || selectedMetrics.length === 0 || isLoadingReport || !BACKEND_URL || analysisJobId) return;
+        if (!selectedProperty || selectedMetrics.length === 0 || isLoadingReport || isAnalyzingBackground || !BACKEND_URL) return;
 
+        // Reset States
         setRawMergedGscData(null);
+        setTopNQueryData([]);
         setAnalyzedResultsMap(new Map());
         setReportError(null);
         setIsLoadingReport(true);
-        setLoadingMessage('Preparing requests...');
-        setReportFilter('');
+        setIsAnalyzingBackground(false);
+        setLoadingMessage('Fetching GSC data...');
         setJobProgress(null);
         setAnalysisJobId(null);
         if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
 
         try {
-            // --- Phase 2: Fetch and Merge GSC Data ---
-            const requestsToMake = new Map<string, { metrics: Set<string>; startDate?: string; endDate?: string }>();
-            const uniqueTimePeriods = new Set<string>();
+            // Fetch and Merge GSC Data
+            const uniqueTimePeriods = Array.from(new Set(selectedMetrics.map(m => m.timePeriod)));
+            if (uniqueTimePeriods.length === 0) throw new Error("No time periods selected.");
 
-            selectedMetrics.forEach(metric => {
-                uniqueTimePeriods.add(metric.timePeriod);
-                if (!requestsToMake.has(metric.timePeriod)) {
-                    requestsToMake.set(metric.timePeriod, { metrics: new Set() });
-                }
-                requestsToMake.get(metric.timePeriod)!.metrics.add(metric.apiName);
-            });
-
-            console.log('Required time periods:', Array.from(uniqueTimePeriods));
-
-            const fetchPromises = Array.from(uniqueTimePeriods).map(async (timePeriod) => {
-                setLoadingMessage(`Fetching data for ${timePeriod}...`);
+            const fetchPromises = uniqueTimePeriods.map(async (timePeriod) => {
                 const dateRange = getDateRange(timePeriod);
-                if (!dateRange) {
-                    console.error(`Could not get date range for ${timePeriod}`);
-                    throw new Error(`Invalid time period specified: ${timePeriod}`);
-                }
-
+                if (!dateRange) throw new Error(`Invalid time period: ${timePeriod}`);
                 const requestBody = {
                     siteUrl: selectedProperty,
                     startDate: dateRange.startDate,
                     endDate: dateRange.endDate,
                     dimensions: ['query'],
                 };
-
-                console.log(`Fetching GSC data for ${timePeriod}:`, requestBody);
                 const response = await fetch(`${BACKEND_URL}/gsc/report`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
                     body: JSON.stringify(requestBody),
                 });
-
                 if (!response.ok) {
                     const errorData = await response.json().catch(() => ({ error: `HTTP error ${response.status}` }));
-                    console.error(`Failed GSC fetch for ${timePeriod}:`, errorData);
                     throw new Error(`GSC fetch failed for ${timePeriod}: ${errorData.error || response.statusText}`);
                 }
                 const resultData: ReportRow[] = await response.json();
-                console.log(`Received ${resultData.length} rows for ${timePeriod}`);
                 return { timePeriod, data: resultData };
             });
 
-            setLoadingMessage(`Fetching data for all periods (${fetchPromises.length})...`);
             const results = await Promise.allSettled(fetchPromises);
-            console.log("GSC Fetch Results (Promise.allSettled):", results);
-
-            setLoadingMessage('Merging data...');
             const mergedData = new Map<string, Partial<DisplayRow>>();
             let fetchErrors: string[] = [];
-
             results.forEach(result => {
                 if (result.status === 'fulfilled') {
                     const { timePeriod, data } = result.value;
                     data.forEach(row => {
                         const query = row.keys?.[0];
-                        if (query) {
-                            const currentEntry = mergedData.get(query) || {};
+                        if (query && typeof query === 'string') {
+                            const currentEntry = mergedData.get(query) || { query: query };
                             currentEntry[`clicks_${timePeriod}`] = row.clicks;
                             currentEntry[`impressions_${timePeriod}`] = row.impressions;
                             currentEntry[`ctr_${timePeriod}`] = row.ctr;
@@ -281,124 +388,302 @@ export default function Home() {
                         }
                     });
                 } else {
-                    console.error("A GSC fetch promise failed:", result.reason);
-                    fetchErrors.push(result.reason?.message || `Failed to fetch data for one period.`);
+                    fetchErrors.push(result.reason?.message || `Failed fetch for one period.`);
                 }
             });
 
-            console.log(`Merged data for ${mergedData.size} unique queries.`);
             setRawMergedGscData(mergedData);
-
             if (fetchErrors.length > 0) {
-                setReportError(`Errors during data fetch: ${fetchErrors.join('; ')}`);
-                setIsLoadingReport(false);
+                throw new Error(`GSC fetch errors: ${fetchErrors.join('; ')}`);
+            }
+            if (mergedData.size === 0) {
                 setLoadingMessage('');
+                setIsLoadingReport(false);
+                setReportError("No data found in GSC for the selected criteria.");
                 return;
             }
 
-            // --- Phase 3: Trigger Progressive Analysis ---
-            setLoadingMessage('Preparing analysis...');
-            const uniqueQueries = Array.from(mergedData.keys());
+            // Filter, Rank, Select Top N
+            setLoadingMessage('Processing data...');
+            let allMergedDataArray = Array.from(mergedData.values());
 
-
-            if (uniqueQueries.length > 0) {
-                console.log(`Triggering Gemini analysis for ${uniqueQueries.length} unique queries...`);
-                setLoadingMessage('Starting AI analysis...');
-                const queryDataForAnalysis = Array.from(mergedData.entries()).map(([query, metrics]) => {
-                    const clicks = metrics['clicks_L28D'] ?? metrics['clicks_L3M'] ?? 0;
-                    return { query: query, clicks: clicks as number };
-                });
-
-                console.log("Frontend: Structure of queryDataForAnalysis[0]:", queryDataForAnalysis[0]);
-                console.log("Frontend: Type of queryDataForAnalysis[0]:", typeof queryDataForAnalysis[0]);
-                console.log("Frontend: Sending this payload to /gemini/analyze-progressive:", { queryData: queryDataForAnalysis });
-                console.log("Frontend: Payload size (estimated string length):", JSON.stringify({ queryData: queryDataForAnalysis }).length);
-
-                try {
-                    const analysisResponse = await fetch(`${BACKEND_URL}/gemini/analyze-progressive`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        credentials: 'include',
-                        // *** SEND THE FULL PAYLOAD ***
-                        body: JSON.stringify({ queryData: queryDataForAnalysis }),
-                    });
-
-
-
-                    if (!analysisResponse.ok) {
-                        throw new Error(`Failed to start analysis job: ${analysisResponse.statusText}`);
-                    }
-
-                    // --- Get the REAL Job ID ---
-                    const { jobId } = await analysisResponse.json(); // jobId should be a UUID from backend
-
-                    if (jobId) {
-                        console.log("Analysis job started successfully. REAL Job ID:", jobId); // LOG THE REAL ID
-                        setAnalysisJobId(jobId); // <--- SET THE *REAL* JOB ID HERE
-                        // Do NOT set it to "simulated-job-id"
-                    } else {
-                        console.log("Analysis skipped or no job ID returned by backend.");
-                        setLoadingMessage('');
-                        setIsLoadingReport(false);
-                    }
-
-                } catch (analysisError: any) {
-                    console.error('Error starting Gemini analysis job:', analysisError);
-                    setReportError(`Failed to start analysis: ${analysisError.message}`);
-                    setIsLoadingReport(false);
-                    setLoadingMessage('');
-                }
-
-            } else {
-                console.log("No unique queries found after merging GSC data.");
-                setLoadingMessage('');
-                setIsLoadingReport(false);
+            // Apply Keyword Filter
+            if (keywordFilter.trim()) {
+                const lowerKeyword = keywordFilter.trim().toLowerCase();
+                allMergedDataArray = allMergedDataArray.filter(item => item.query?.toLowerCase().includes(lowerKeyword));
             }
 
-        } catch (error: any) {
-            console.error('Error during report generation:', error);
-            setReportError(error.message || 'An unknown error occurred during report generation.');
+            // Apply Min Clicks Filter (hardcoded to 1)
+            const minClicks = 1;
+            allMergedDataArray = allMergedDataArray.filter(item => {
+                const clicks = item['clicks_L28D'] ?? item['clicks_L3M'] ?? 0;
+                return (clicks as number) >= minClicks;
+            });
+
+            // Rank by primary click metric
+            allMergedDataArray.sort((a, b) => {
+                const clicksA = (a['clicks_L28D'] ?? a['clicks_L3M'] ?? 0) as number;
+                const clicksB = (b['clicks_L28D'] ?? b['clicks_L3M'] ?? 0) as number;
+                return clicksB - clicksA;
+            });
+
+            // Select Top N
+            const selectedTopN = parseInt(topNCount, 10) || parseInt(DEFAULT_TOP_N, 10);
+            const topNDataSlice = allMergedDataArray.slice(0, selectedTopN);
+            setTopNQueryData(topNDataSlice);
+
+            const queriesForHybridAnalysis = topNDataSlice.map(item => item.query).filter(q => typeof q === 'string') as string[];
+
+            if (queriesForHybridAnalysis.length === 0) {
+                setLoadingMessage('');
+                setIsLoadingReport(false);
+                setReportError("No queries remaining after filtering to send for analysis.");
+                return;
+            }
+
+            // Hybrid Gemini Analysis
+            setLoadingMessage(`Analyzing initial ${Math.min(queriesForHybridAnalysis.length, IMMEDIATE_BATCH_SIZE)} queries...`);
+            console.log(`Frontend: Sending ${queriesForHybridAnalysis.length} queries to /gemini/analyze-top-n-hybrid`);
+
+            const hybridResponse = await fetch(`${BACKEND_URL}/gemini/analyze-top-n-hybrid`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ topNQueries: queriesForHybridAnalysis }),
+            });
+
+            if (!hybridResponse.ok && hybridResponse.status !== 202) {
+                const errorData = await hybridResponse.json().catch(() => ({ error: `HTTP error ${hybridResponse.status}` }));
+                throw new Error(`Failed to start analysis: ${errorData.error || hybridResponse.statusText}`);
+            }
+
+            const { jobId, initialResults } = await hybridResponse.json();
+            console.log(`Frontend: Received initial results for ${Object.keys(initialResults || {}).length} queries. Job ID: ${jobId}`);
+
+            if (initialResults) {
+                setAnalyzedResultsMap(new Map(Object.entries(initialResults)));
+            }
+
+            const needsBackground = jobId && queriesForHybridAnalysis.length > IMMEDIATE_BATCH_SIZE;
+
             setIsLoadingReport(false);
+
+            if (needsBackground) {
+                setAnalysisJobId(jobId);
+                setIsAnalyzingBackground(true);
+                setLoadingMessage('Analyzing remaining queries in background...');
+            } else {
+                setLoadingMessage('');
+                setIsAnalyzingBackground(false);
+                if (!jobId && queriesForHybridAnalysis.length > IMMEDIATE_BATCH_SIZE) {
+                    setReportError("Background analysis job failed to initialize.");
+                }
+            }
+        } catch (error: any) {
+            console.error('Error during report generation process:', error);
+            setReportError(error.message || 'An unknown error occurred.');
+            setIsLoadingReport(false);
+            setIsAnalyzingBackground(false);
             setLoadingMessage('');
-            setRawMergedGscData(null);
-            setAnalysisJobId(null);
-            setJobProgress(null);
-            if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
         }
     };
 
     // --- Derived State for Display ---
     const displayData = useMemo((): DisplayRow[] => {
-        if (!rawMergedGscData) return [];
-        const dataToShow: DisplayRow[] = [];
-        rawMergedGscData.forEach((mergedRowData, query) => {
-            const analysis = analyzedResultsMap.get(query);
-            if (analysis) {
-                if (typeof query === 'string') {
-                    dataToShow.push({
-                        query: query,
-                        ...mergedRowData,
-                        geminiIntent: analysis.intent,
-                        geminiCategory: analysis.category,
-                        isSampled: true,
-                    });
-                }
-            }
+        return topNQueryData.map(item => {
+            const analysis = analyzedResultsMap.get(item.query as string);
+            return {
+                ...item,
+                query: item.query as string,
+                geminiIntent: analysis?.intent ?? 'Pending...',
+                geminiCategory: analysis?.category ?? 'Pending...',
+                isSampled: !!analysis,
+            };
         });
-        return dataToShow;
-    }, [rawMergedGscData, analyzedResultsMap]);
+    }, [topNQueryData, analyzedResultsMap]);
 
-    const filteredDisplayData = displayData?.filter((row) =>
-        row.query?.toLowerCase().includes(reportFilter.toLowerCase())
-    ) ?? [];
+    // --- Export Handlers ---
+    const handleExportCsv = () => {
+        if (!displayData || displayData.length === 0) {
+            alert("No data available to export.");
+            return;
+        }
 
-    // --- Handler for View Full Data ---
+        interface ExportHeader {
+            key: string;
+            label: string;
+        }
+
+        const headers: ExportHeader[] = [
+            { key: 'query', label: 'Query' },
+            { key: 'category', label: 'Category' },
+            ...selectedMetrics.map((m: Metric) => ({ key: `${m.apiName}_${m.timePeriod}`, label: m.name })),
+            { key: 'geminiCategory', label: 'Category (AI)' },
+            { key: 'geminiIntent', label: 'Intent (AI)' },
+        ];
+
+        const csvData = displayData.map(row => {
+            const rowData: { [key: string]: any } = {};
+            headers.forEach(header => {
+                if (header.key === 'category') {
+                    rowData[header.label] = 'N/A';
+                } else {
+                    rowData[header.label] = row[header.key] ?? '';
+                }
+            });
+            return rowData;
+        });
+
+        try {
+            const csv = Papa.unparse(csvData);
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const date = new Date().toISOString().split('T')[0];
+            saveAs(blob, `serprisingly_report_${selectedProperty}_${date}.csv`);
+        } catch (err) {
+            console.error("Error generating CSV:", err);
+            setReportError("Failed to generate CSV file.");
+        }
+    };
+
+    const handleExportToSheets = async () => {
+        if (!displayData || displayData.length === 0) {
+            alert("No analyzed data available to export.");
+            return;
+        }
+
+        if (!isClient || !isGapiLoaded) {
+            alert("Google API Client is not ready. Please wait and try again.");
+            return;
+        }
+
+        setIsExportingSheet(true);
+        setReportError(null);
+
+        try {
+            // Initialize sheets API first
+            if (!window.gapi.client.sheets) {
+                console.log("Loading sheets API...");
+                await window.gapi.client.load('sheets', 'v4');
+            }
+
+            const googleAuth = window.gapi.auth2.getAuthInstance();
+            if (!googleAuth) {
+                throw new Error("Google Auth instance not found.");
+            }
+
+            let currentUser = googleAuth.currentUser.get();
+
+            if (!googleAuth.isSignedIn.get() || !currentUser.hasGrantedScopes(GAPI_SHEETS_SCOPE)) {
+                console.log("Requesting Sheets scope...");
+                await googleAuth.signIn({ scope: GAPI_SHEETS_SCOPE, prompt: 'consent' });
+                currentUser = googleAuth.currentUser.get();
+                if (!currentUser.hasGrantedScopes(GAPI_SHEETS_SCOPE)) {
+                    throw new Error("Google Sheets permission not granted.");
+                }
+                setIsSheetsAuthorized(true);
+            }
+
+            console.log("User authorized for Sheets API.");
+
+            const headers = [
+                'Query', 'Category',
+                ...selectedMetrics.map(m => m.name),
+                'Category (AI)', 'Intent (AI)'
+            ];
+
+            const values = displayData.map(row => {
+                const rowData = [
+                    row.query ?? '',
+                    'N/A',
+                ];
+                selectedMetrics.forEach(m => {
+                    const key = `${m.apiName}_${m.timePeriod}`;
+                    const rawValue = row[key];
+                    let formattedValue = '';
+                    if (typeof rawValue === 'number') {
+                        if (m.apiName === 'ctr') formattedValue = rawValue.toString();
+                        else if (m.apiName === 'position') formattedValue = rawValue.toFixed(1);
+                        else formattedValue = rawValue.toString();
+                    }
+                    rowData.push(formattedValue);
+                });
+                rowData.push(row.geminiCategory ?? '');
+                rowData.push(row.geminiIntent ?? '');
+                return rowData;
+            });
+
+            // Create the spreadsheet
+            const resource = {
+                properties: {
+                    title: `Serprisingly Report - ${selectedProperty} - ${new Date().toISOString().split('T')[0]}`
+                },
+                sheets: [{
+                    properties: {
+                        title: 'Report Data',
+                        gridProperties: {
+                            rowCount: values.length + 1,
+                            columnCount: headers.length
+                        }
+                    }
+                }]
+            };
+
+            console.log("Creating spreadsheet...");
+            const createResponse = await window.gapi.client.sheets.spreadsheets.create({
+                resource: resource
+            });
+
+            if (!createResponse?.result?.spreadsheetId) {
+                throw new Error("Failed to create spreadsheet: No spreadsheet ID returned");
+            }
+
+            const spreadsheetId = createResponse.result.spreadsheetId;
+            const spreadsheetUrl = createResponse.result.spreadsheetUrl;
+            console.log(`Spreadsheet created with ID: ${spreadsheetId}`);
+
+            // Update the spreadsheet with values
+            const valueRange = {
+                values: [headers, ...values.map(row => row.map(cell => cell === null ? '' : cell))]
+            };
+
+            console.log("Updating spreadsheet with data...");
+            await window.gapi.client.sheets.spreadsheets.values.update({
+                spreadsheetId: spreadsheetId,
+                range: 'Report Data!A1',
+                valueInputOption: 'USER_ENTERED',
+                resource: valueRange
+            });
+
+            console.log(`Spreadsheet updated successfully: ${spreadsheetUrl}`);
+            alert(`Successfully exported to Google Sheet!\nID: ${spreadsheetId}`);
+            window.open(spreadsheetUrl, '_blank');
+
+        } catch (error) {
+            console.error("Error exporting to Google Sheets:", error);
+            let message = "Failed to export to Google Sheets.";
+            if (
+                typeof error === 'object' &&
+                error !== null &&
+                ('error' in error && error.error === 'popup_closed_by_user' ||
+                    'details' in error && typeof error.details === 'string' && error.details.includes('access_denied'))
+            ) {
+                message = "Google Sheets permission was denied.";
+            } else if (error instanceof Error) {
+                message += ` ${error.message}`;
+            } else if (typeof error === 'object' && error !== null && 'details' in error) {
+                message += ` ${(error as { details: string }).details}`;
+            }
+            setReportError(message);
+        } finally {
+            setIsExportingSheet(false);
+        }
+    };
+
+    // --- Navigation to Full Report ---
     const handleViewFullData = () => {
-        if (rawMergedGscData) {
+        if (rawMergedGscData && rawMergedGscData.size > 0) {
             try {
-                const dataArray = Array.from(rawMergedGscData.entries()).map(([query, metrics]) => ({ query, ...metrics }));
+                const dataArray = Array.from(rawMergedGscData.values());
                 localStorage.setItem('fullGscReportData', JSON.stringify(dataArray));
                 localStorage.setItem('selectedMetricsForFullView', JSON.stringify(selectedMetrics));
                 router.push('/full-report');
@@ -406,18 +691,15 @@ export default function Home() {
                 console.error("Failed to store full data for navigation:", e);
                 setReportError("Could not prepare full data view due to storage limits.");
             }
+        } else {
+            alert("No GSC data available to view.");
         }
     };
 
     // --- Render Functions ---
     const renderMainContent = () => {
         if (isLoadingAuth) {
-            return (
-                <div className="space-y-4">
-                    <Skeleton className="h-12 w-full" />
-                    <Skeleton className="h-64 w-full" />
-                </div>
-            );
+            return <div className="flex items-center justify-center min-h-[300px]"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
         }
 
         if (!isAuthenticated) {
@@ -436,95 +718,167 @@ export default function Home() {
 
         return (
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-                <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 mt-6">
-                    {/* Config Panel */}
-                    <div className="lg:col-span-1 space-y-6">
-                        <Card className="shadow-sm">
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+                    {/* ===== LEFT SIDEBAR (Configuration) ===== */}
+                    <div className="lg:col-span-2 space-y-6">
+                        <Card className="shadow-sm sticky top-[80px]">
                             <CardHeader>
-                                <CardTitle className="text-base font-semibold flex items-center gap-2">
-                                    <Settings2 size={18} /> Report Configuration
-                                </CardTitle>
+                                <CardTitle className="text-lg font-semibold flex items-center gap-2"><Settings2 size={20} /> Report Builder</CardTitle>
                             </CardHeader>
-                            <CardContent className="space-y-4">
-                                <PropertySelector
-                                    properties={gscProperties}
-                                    selectedProperty={selectedProperty}
-                                    onSelect={setSelectedProperty}
-                                    isLoading={isLoadingProperties}
-                                    error={propertyError}
-                                />
+                            <CardContent className="space-y-5">
+                                {/* 1. Property Selection */}
                                 <div>
-                                    <h3 className="text-sm font-medium mb-2">Available Metrics</h3>
-                                    <div className="flex flex-wrap gap-2 p-2 rounded-md border bg-muted/50 min-h-[50px]">
+                                    <h3 className="text-sm font-medium mb-1 text-muted-foreground">1. Select Property</h3>
+                                    <PropertySelector properties={gscProperties} selectedProperty={selectedProperty} onSelectProperty={setSelectedProperty} isLoading={isLoadingProperties} error={propertyError} />
+                                </div>
+                                <Separator />
+
+                                {/* 2. Available Metrics */}
+                                <div>
+                                    <h3 className="text-sm font-medium mb-1 text-muted-foreground">2. Available Metrics</h3>
+                                    <CardDescription className="text-xs mb-2">Drag metrics to the area below</CardDescription>
+                                    <div className="flex flex-wrap gap-2 p-3 rounded-md border bg-muted/50 min-h-[80px] max-h-[250px] overflow-y-auto">
                                         {availableMetrics.map((metric: Metric) => (
                                             <TooltipProvider key={metric.id} delayDuration={100}>
                                                 <Tooltip>
                                                     <TooltipTrigger asChild>
-                                                        <DraggableMetric id={metric.id} metric={metric} origin="available" />
+                                                        <div>
+                                                            <DraggableMetric id={metric.id} metric={metric} origin="available" />
+                                                        </div>
                                                     </TooltipTrigger>
-                                                    <TooltipContent>
-                                                        <p>Drag to 'Selected Metrics'</p>
-                                                    </TooltipContent>
+                                                    <TooltipContent side="bottom"><p>Drag to 'Selected Metrics'</p></TooltipContent>
                                                 </Tooltip>
                                             </TooltipProvider>
                                         ))}
+                                        {availableMetrics.length === 0 && <p className="text-xs text-muted-foreground p-2 w-full text-center">All metrics selected.</p>}
                                     </div>
+                                </div>
+                                <Separator />
+
+                                {/* 3. Selected Metrics */}
+                                <div>
+                                    <h3 className="text-sm font-medium mb-1 text-muted-foreground">3. Selected Metrics</h3>
+                                    <DroppableArea id="selected-metrics-area" title="Report Columns">
+                                        {selectedMetrics.length > 0 ? (
+                                            <div className="flex flex-wrap gap-3 p-1 min-h-[40px]">
+                                                {selectedMetrics.map((metric: Metric) => (
+                                                    <div key={metric.id} className="relative group">
+                                                        <DraggableMetric id={metric.id} metric={metric} origin="selected-metrics-area" />
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="icon"
+                                                            onClick={() => removeSelectedMetric(metric.id)}
+                                                            className="absolute -top-2 -right-2 w-5 h-5 rounded-full p-0 opacity-0 group-hover:opacity-100 transition-opacity focus:opacity-100 text-destructive hover:bg-destructive/10"
+                                                            aria-label={`Remove ${metric.name}`}
+                                                        >
+                                                            <X size={12} />
+                                                        </Button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        ) : null}
+                                    </DroppableArea>
+                                </div>
+                                <Separator />
+
+                                {/* 4. Analysis Options */}
+                                <div>
+                                    <h3 className="text-sm font-medium mb-1 text-muted-foreground flex items-center gap-1"><ListChecks size={14} /> Analysis Options</h3>
+                                    <div className="space-y-3 mt-2">
+                                        <div className="flex items-center gap-2">
+                                            <TooltipProvider>
+                                                <Tooltip>
+                                                    <TooltipTrigger asChild><Clock size={16} className="text-muted-foreground" /></TooltipTrigger>
+                                                    <TooltipContent><p>Number of top queries (by clicks) to analyze</p></TooltipContent>
+                                                </Tooltip>
+                                            </TooltipProvider>
+                                            <Select value={topNCount} onValueChange={setTopNCount} disabled={isLoadingReport || isAnalyzingBackground}>
+                                                <SelectTrigger className="h-8 text-xs flex-1"><SelectValue placeholder="Analyze Top..." /></SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="10">Analyze Top 10</SelectItem>
+                                                    <SelectItem value="25">Analyze Top 25</SelectItem>
+                                                    <SelectItem value="50">Analyze Top 50</SelectItem>
+                                                    <SelectItem value="100">Analyze Top 100</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <Search size={16} className="text-muted-foreground" />
+                                            <Input
+                                                placeholder="Filter by keyword (before analysis)..."
+                                                value={keywordFilter}
+                                                onChange={(e) => setKeywordFilter(e.target.value)}
+                                                className="h-8 text-xs"
+                                                disabled={isLoadingReport || isAnalyzingBackground}
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                                <Separator />
+
+                                {/* 5. Generate */}
+                                <div>
+                                    <Button
+                                        className="w-full"
+                                        onClick={handleGenerateReport}
+                                        disabled={selectedMetrics.length === 0 || isLoadingReport || isAnalyzingBackground || !selectedProperty}
+                                    >
+                                        {isLoadingReport ? (
+                                            <>
+                                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                                {loadingMessage || 'Processing...'}
+                                            </>
+                                        ) : isAnalyzingBackground ? (
+                                            <>
+                                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                                Analyzing Background...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <BarChartHorizontalBig className="mr-2 h-0 w-4" />
+                                                Generate Report
+                                            </>
+                                        )}
+                                    </Button>
                                 </div>
                             </CardContent>
                         </Card>
                     </div>
 
-                    {/* Drop Area & Report */}
-                    <div className="lg:col-span-3 space-y-6">
-                        <DroppableArea id="selected-metrics-area" title="Selected Metrics">
-                            {selectedMetrics.length > 0 ? (
-                                <div className="flex flex-wrap gap-3 p-2 min-h-[40px]">
-                                    {selectedMetrics.map((metric: Metric) => (
-                                        <div key={metric.id} className="relative group">
-                                            <DraggableMetric id={metric.id} metric={metric} origin="selected-metrics-area" />
-                                            <Button
-                                                variant="destructive"
-                                                size="icon"
-                                                onClick={() => removeSelectedMetric(metric.id)}
-                                                className="absolute -top-2 -right-2 w-4 h-4 rounded-full p-0 opacity-0 group-hover:opacity-100 transition-opacity focus:opacity-100"
-                                                aria-label={`Remove ${metric.name}`}
-                                            >
-                                                <X size={10} />
-                                            </Button>
-                                        </div>
-                                    ))}
-                                </div>
-                            ) : (
-                                <p className="text-sm text-muted-foreground text-center py-4">Drag metrics here</p>
-                            )}
-                        </DroppableArea>
-                        <div className="flex justify-end items-center gap-4">
-                            <Button
-                                onClick={handleGenerateReport}
-                                disabled={selectedMetrics.length === 0 || isLoadingReport || !selectedProperty || !!analysisJobId}
-                            >
-                                {isLoadingReport ? (loadingMessage || 'Generating/Analyzing...') : 'Generate Report'}
-                            </Button>
-                        </div>
-                        {isLoadingReport && jobProgress && (
-                            <div className="space-y-1">
-                                <Progress value={(jobProgress.completed / jobProgress.total) * 100} className="w-full" />
-                                <p className="text-sm text-muted-foreground">
-                                    {jobProgress.status === 'running'
-                                        ? `Analyzing ${jobProgress.completed} of ${jobProgress.total} queries...`
-                                        : jobProgress.status}
-                                </p>
-                            </div>
+                    {/* ===== CENTER AREA (Report Table) ===== */}
+                    <div className="lg:col-span-7 space-y-6">
+                        {/* Background Progress Indicator */}
+                        {isAnalyzingBackground && jobProgress && (
+                            <Card>
+                                <CardHeader className="pb-2 pt-4">
+                                    <CardTitle className="text-base">Background Analysis Progress</CardTitle>
+                                </CardHeader>
+                                <CardContent className="pb-4">
+                                    <Progress
+                                        value={jobProgress.total > 0 ? (jobProgress.completed / jobProgress.total) * 100 : 0}
+                                        className="w-full mb-2 h-2"
+                                    />
+                                    <p className="text-xs text-muted-foreground text-center">
+                                        {jobProgress.status === 'running'
+                                            ? `Analyzing query ${jobProgress.completed} of ${jobProgress.total}...`
+                                            : `Status: ${jobProgress.status}`}
+                                    </p>
+                                </CardContent>
+                            </Card>
                         )}
-                        {reportError && !isLoadingReport && (
+                        {/* Global Report Error */}
+                        {reportError && (
                             <Alert variant="destructive">
                                 <AlertCircle className="h-4 w-4" />
                                 <AlertTitle>Error</AlertTitle>
                                 <AlertDescription>{reportError}</AlertDescription>
                             </Alert>
                         )}
-                        <div className="mt-4">
-                            {isLoadingReport && !jobProgress && !reportError && (
+
+                        {/* Report Results Section */}
+                        <div className="mt-0">
+                            {/* Skeleton Loader */}
+                            {isLoadingReport && !reportError && (
                                 <Card>
                                     <CardContent className="p-6">
                                         <Skeleton className="h-8 w-full mb-4" />
@@ -532,39 +886,82 @@ export default function Home() {
                                     </CardContent>
                                 </Card>
                             )}
-                            {(rawMergedGscData || displayData.length > 0 || isLoadingReport) && !reportError && (
-                                <>
-                                    <div className="flex items-center justify-between gap-4 mb-4">
-                                        <Input
-                                            placeholder="Filter analyzed queries..."
-                                            value={reportFilter}
-                                            onChange={(e) => setReportFilter(e.target.value)}
-                                            className="max-w-xs"
-                                            disabled={displayData.length === 0}
-                                        />
-                                        <div className="flex items-center gap-2">
-                                            <Button variant="outline" size="sm" disabled={displayData.length === 0}>
-                                                <Download className="h-4 w-4 mr-2" /> Export Analyzed (CSV)
-                                            </Button>
-                                            <Button variant="secondary" size="sm" disabled={!rawMergedGscData} onClick={handleViewFullData}>
-                                                View SMART GSC Data ({rawMergedGscData?.size ?? 0})
-                                            </Button>
-                                        </div>
-                                    </div>
-                                    <ReportTable data={filteredDisplayData} visibleMetrics={selectedMetrics} />
-                                    {displayData.length === 0 && !isLoadingReport && jobProgress?.status !== 'running' && rawMergedGscData && (
-                                        <p className="text-center text-muted-foreground mt-4">No analysis results available yet or none matched filter.</p>
-                                    )}
-                                </>
+
+                            {/* Render Table Section */}
+                            {(topNQueryData.length > 0 || isAnalyzingBackground) && !isLoadingReport && (
+                                <ReportTable data={displayData} visibleMetrics={selectedMetrics} />
                             )}
-                            {!rawMergedGscData && !isLoadingReport && !reportError && (
-                                <Card>
-                                    <CardHeader><CardTitle>Report Results</CardTitle></CardHeader>
+
+                            {/* Initial state message */}
+                            {!rawMergedGscData && !isLoadingReport && !isAnalyzingBackground && !reportError && (
+                                <Card className="border-dashed border-2 min-h-[400px] flex items-center justify-center">
                                     <CardContent className="p-6 text-center text-muted-foreground">
-                                        Configure your report options above and click "Generate Report".
+                                        <p>Configure your report options on the left and click "Generate Report".</p>
                                     </CardContent>
                                 </Card>
                             )}
+                        </div>
+                    </div>
+
+                    {/* ===== RIGHT SIDEBAR (Details & Actions) ===== */}
+                    <div className="lg:col-span-3 space-y-6">
+                        <div className="sticky top-[80px] space-y-6">
+                            {/* Selected Property Info */}
+                            <Card>
+                                <CardHeader className="pb-2 pt-4">
+                                    <CardTitle className="text-base flex items-center gap-2"><Globe size={16} /> Selected Property</CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                    {selectedProperty ? (
+                                        <p className="text-sm font-medium break-all">{selectedProperty}</p>
+                                    ) : (
+                                        <p className="text-sm text-muted-foreground">Select a property</p>
+                                    )}
+                                </CardContent>
+                            </Card>
+
+                            {/* Analysis Trends */}
+                            <Card>
+                                <CategoryDistributionChart data={displayData} />
+                            </Card>
+
+                            {/* Export & View Actions */}
+                            <Card>
+                                <CardHeader className="pb-2 pt-4">
+                                    <CardTitle className="text-base flex items-center gap-2"><Download size={16} /> Actions</CardTitle>
+                                </CardHeader>
+                                <CardContent className="space-y-3">
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="w-full justify-start"
+                                        onClick={handleExportCsv}
+                                        disabled={displayData.length === 0}
+                                    >
+                                        <Download className="h-4 w-4 mr-2" /> Export Displayed (CSV)
+                                    </Button>
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="w-full justify-start"
+                                        onClick={handleExportToSheets}
+                                        disabled={displayData.length === 0 || !isGapiLoaded || isGapiInitializing || isExportingSheet}
+                                    >
+                                        {isExportingSheet ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FileSpreadsheet className="h-4 w-4 mr-2" />}
+                                        {isExportingSheet ? 'Exporting...' : 'Export to Google Sheets'}
+                                    </Button>
+                                    {(!isGapiLoaded || isGapiInitializing) && <p className="text-xs text-muted-foreground">Google API loading...</p>}
+                                    <Button
+                                        variant="secondary"
+                                        size="sm"
+                                        className="w-full justify-start"
+                                        onClick={handleViewFullData}
+                                        disabled={!rawMergedGscData || rawMergedGscData.size === 0}
+                                    >
+                                        <Info className="h-4 w-4 mr-2" /> View All GSC Data ({rawMergedGscData?.size ?? 0})
+                                    </Button>
+                                </CardContent>
+                            </Card>
                         </div>
                     </div>
                 </div>
@@ -574,23 +971,22 @@ export default function Home() {
 
     // --- Final Render ---
     return (
-        <TooltipProvider delayDuration={300}>
+        <TooltipProvider delayDuration={200}>
             <Head>
                 <title>Serprisingly - Custom Report Builder</title>
                 <link rel="icon" href="/favicon.ico" />
             </Head>
-            <div className="min-h-screen flex flex-col">
-                <header className="flex justify-between items-center p-4 border-b bg-primary text-primary-foreground shadow-sm sticky top-0 z-10">
+            <div className="min-h-screen flex flex-col bg-slate-50">
+                <header className="flex justify-between items-center p-4 border-b bg-primary text-primary-foreground shadow-sm sticky top-0 z-50 h-[65px]">
                     <h1 className="text-xl font-semibold">Serprisingly Report Builder</h1>
                     <div className="flex items-center gap-4">
-                        {isAuthenticated && selectedProperty && (
-                            <span className="text-sm hidden md:inline opacity-80">Property: {selectedProperty}</span>
-                        )}
                         <AuthButton isAuthenticated={isAuthenticated} onLogout={handleLogout} isLoading={isLoadingAuth} />
                     </div>
                 </header>
-                <main className="flex-grow container mx-auto px-4 py-6 md:px-6 md:py-8">{renderMainContent()}</main>
-                <footer className="mt-12 p-4 text-center text-muted-foreground text-xs border-t">
+                <main className="flex-grow container mx-auto px-4 py-6 md:px-6 md:py-8">
+                    {renderMainContent()}
+                </main>
+                <footer className="mt-12 p-4 text-center text-muted-foreground text-xs border-t bg-background">
                     Powered by Next.js, Node.js, GSC API, and Gemini API
                 </footer>
             </div>
