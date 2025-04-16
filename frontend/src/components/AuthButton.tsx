@@ -14,7 +14,7 @@ const AuthButton = ({ isAuthenticated, onLogout, isLoading }: AuthButtonProps) =
 
   const handleLoginClick = () => {
     if (backendUrl) {
-      window.location.href = `${backendUrl}/auth/login`;
+      window.location.href = `${backendUrl}auth/login`;
     } else {
       console.error('Backend URL not configured!');
       alert('Error: Cannot initiate login. Backend URL missing.');
