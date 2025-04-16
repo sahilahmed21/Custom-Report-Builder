@@ -2,11 +2,11 @@
 "use client";
 
 import React, { useMemo, useState } from 'react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, TooltipProps } from 'recharts';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { DisplayRow } from '../types';
 import { BarChart3 } from 'lucide-react';
-
+import { NameType, ValueType } from 'recharts/types/component/DefaultTooltipContent';
 interface CategoryDistributionChartProps {
     data: DisplayRow[];
 }
@@ -18,20 +18,21 @@ const COLORS = [
 ];
 
 // Custom Tooltip Content
-const CustomTooltip = ({ active, payload }: any) => {
+type CustomTooltipProps = TooltipProps<ValueType, NameType>;
+
+// Update CustomTooltip to use specific type
+const CustomTooltip = ({ active, payload }: CustomTooltipProps) => {
     if (active && payload && payload.length) {
-        const data = payload[0].payload;
+        const data = payload[0].payload; // Access the original data point
         return (
-            <div className="bg-white border shadow-sm rounded-md p-3 text-sm">
-                <p className="font-medium">{`${data.name}`}</p>
-                <p className="text-muted-foreground">{`Count: ${data.value}`}</p>
-                <p className="text-muted-foreground text-xs">{`${Math.round((data.value / data.totalCount) * 100)}%`}</p>
+            <div className="bg-background border shadow-sm rounded-md p-2 text-sm">
+                <p className="font-medium">{data.name}</p>
+                <p className="text-muted-foreground">Count: {data.value}</p>
             </div>
         );
     }
     return null;
 };
-
 export const CategoryDistributionChart: React.FC<CategoryDistributionChartProps> = ({ data }) => {
     const [hoveredCategory, setHoveredCategory] = useState<string | null>(null);
 

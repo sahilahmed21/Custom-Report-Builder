@@ -139,7 +139,7 @@ export default function Home() {
             }
         };
         checkAuth();
-    }, [BACKEND_URL]);
+    }, []); // Removed BACKEND_URL
 
     // Properties & Reset on Auth Change
     useEffect(() => {
@@ -259,22 +259,16 @@ export default function Home() {
         if (!isClient || isGapiLoaded || isGapiInitializing) {
             return;
         }
-
         if (!GAPI_CLIENT_ID) {
             console.warn("Google Client ID for GAPI not found (NEXT_PUBLIC_GOOGLE_CLIENT_ID). Sheets export disabled.");
             return;
         }
-
         setIsGapiInitializing(true);
         console.log("Attempting to load GAPI client...");
-
         const loadGapi = async () => {
             try {
-                // Import and initialize GAPI
                 const gapi = await import('gapi-script').then(module => module.gapi);
                 window.gapi = gapi;
-
-                // Load client and auth2 libraries
                 await new Promise((resolve, reject) => {
                     gapi.load('client:auth2', {
                         callback: resolve,
@@ -283,19 +277,14 @@ export default function Home() {
                         ontimeout: reject
                     });
                 });
-
-                // Initialize the client
                 await gapi.client.init({
                     apiKey: GAPI_API_KEY,
                     clientId: GAPI_CLIENT_ID,
                     scope: GAPI_SHEETS_SCOPE,
                     discoveryDocs: ['https://sheets.googleapis.com/$discovery/rest?version=v4']
                 });
-
                 console.log("GAPI client initialized successfully");
                 setIsGapiLoaded(true);
-
-                // Check if already authenticated
                 const googleAuth = gapi.auth2.getAuthInstance();
                 if (googleAuth?.isSignedIn?.get() &&
                     googleAuth.currentUser?.get()?.hasGrantedScopes(GAPI_SHEETS_SCOPE)) {
@@ -310,9 +299,8 @@ export default function Home() {
                 setIsGapiInitializing(false);
             }
         };
-
         loadGapi();
-    }, [isClient, isGapiLoaded, isGapiInitializing, GAPI_CLIENT_ID, GAPI_API_KEY]);
+    }, [isClient, isGapiLoaded, isGapiInitializing]);
 
     // --- Handlers ---
     const handleLogout = async () => {
@@ -372,7 +360,7 @@ export default function Home() {
 
             const results = await Promise.allSettled(fetchPromises);
             const mergedData = new Map<string, Partial<DisplayRow>>();
-            let fetchErrors: string[] = [];
+            const fetchErrors: string[] = []; // Changed to const
             results.forEach(result => {
                 if (result.status === 'fulfilled') {
                     const { timePeriod, data } = result.value;
@@ -391,7 +379,6 @@ export default function Home() {
                     fetchErrors.push(result.reason?.message || `Failed fetch for one period.`);
                 }
             });
-
             setRawMergedGscData(mergedData);
             if (fetchErrors.length > 0) {
                 throw new Error(`GSC fetch errors: ${fetchErrors.join('; ')}`);
@@ -479,14 +466,20 @@ export default function Home() {
                     setReportError("Background analysis job failed to initialize.");
                 }
             }
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('Error during report generation process:', error);
-            setReportError(error.message || 'An unknown error occurred.');
+            let message = 'An unknown error occurred.';
+            if (error instanceof Error) {
+                message = error.message;
+            } else if (typeof error === 'string') {
+                message = error;
+            }
+            setReportError(message);
             setIsLoadingReport(false);
             setIsAnalyzingBackground(false);
             setLoadingMessage('');
         }
-    };
+    };  // End of handleGenerateReport
 
     // --- Derived State for Display ---
     const displayData = useMemo((): DisplayRow[] => {
@@ -658,19 +651,19 @@ export default function Home() {
             alert(`Successfully exported to Google Sheet!\nID: ${spreadsheetId}`);
             window.open(spreadsheetUrl, '_blank');
 
-        } catch (error) {
+        } catch (error: unknown) {
             console.error("Error exporting to Google Sheets:", error);
             let message = "Failed to export to Google Sheets.";
             if (
                 typeof error === 'object' &&
                 error !== null &&
-                ('error' in error && error.error === 'popup_closed_by_user' ||
-                    'details' in error && typeof error.details === 'string' && error.details.includes('access_denied'))
+                ('error' in error && (error as { error: string }).error === 'popup_closed_by_user' ||
+                    'details' in error && typeof (error as { details: string }).details === 'string' && (error as { details: string }).details.includes('access_denied'))
             ) {
                 message = "Google Sheets permission was denied.";
             } else if (error instanceof Error) {
                 message += ` ${error.message}`;
-            } else if (typeof error === 'object' && error !== null && 'details' in error) {
+            } else if (typeof error === 'object' && error !== null && 'details' in error && typeof (error as { details: string }).details === 'string') {
                 message += ` ${(error as { details: string }).details}`;
             }
             setReportError(message);
@@ -746,7 +739,7 @@ export default function Home() {
                                                             <DraggableMetric id={metric.id} metric={metric} origin="available" />
                                                         </div>
                                                     </TooltipTrigger>
-                                                    <TooltipContent side="bottom"><p>Drag to 'Selected Metrics'</p></TooltipContent>
+                                                    <TooltipContent side="bottom"><p>Drag to &apos;Selected Metrics&apos;</p></TooltipContent>
                                                 </Tooltip>
                                             </TooltipProvider>
                                         ))}
