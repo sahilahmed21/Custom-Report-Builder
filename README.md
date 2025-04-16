@@ -2,11 +2,12 @@
 
 A full-stack web application allowing users to connect their Google Search Console (GSC) account, select metrics and time ranges, and generate custom reports enriched with AI-driven intent and category analysis using the Google Gemini API. This project focuses on analyzing the Top N queries for efficiency and API limit management.
 
-**Live Demo:** [Link to your deployed Vercel frontend] *(Replace with your actual link)*
-**Backend API:** [Link to your deployed Render backend] *(Replace with your actual link)*
+**Live Demo:** https://custom-report-builder.vercel.app/
+**Backend API:** https://custom-report-builder.onrender.com/
 
-<!-- ![Screenshot of Serprisingly Report Builder](./path/to/screenshot.png) -->
-*Add a screenshot here if possible*
+![System Architecture and Data Flow](/frontend/public/image.png)
+
+
 
 ## Features
 
@@ -188,8 +189,6 @@ custom-report-builder/
 
 ## How It Works
 
-![System Architecture and Data Flow](/frontend/public/image.png)
-*System architecture and data flow diagram showing the complete process from authentication to report generation*
 
 1. **Authentication Flow**
    - User initiates login through the frontend interface
