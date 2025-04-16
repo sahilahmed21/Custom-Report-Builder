@@ -776,7 +776,7 @@ export default function Home() {
                         </CardHeader>
                         <CardContent className="flex justify-center pb-8">
                             <Button
-                                onClick={() => window.location.href = `${BACKEND_URL}/auth/google`}
+                                onClick={() => window.location.href = `${BACKEND_URL}/auth/login`}
                                 className="group relative inline-flex items-center justify-center px-6 py-3 text-base font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-all duration-300 shadow-md hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 <svg className="w-5 h-5 mr-2" viewBox="0 0 24 24" fill="currentColor">
