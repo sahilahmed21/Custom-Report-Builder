@@ -61,38 +61,41 @@ A full-stack web application allowing users to connect their Google Search Conso
 
 ## Project Structure
 
+```
 custom-report-builder/
 ├── frontend/
-│ ├── components/ # Reusable UI components (AuthButton, ReportTable, etc.)
-│ │ └── ui/ # shadcn/ui components
-│ ├── public/ # Static assets (favicon, images)
-│ ├── src/ # Source code (if using src dir)
-│ │ └── app/ # Next.js App Router structure
-│ │ ├── page.tsx # Main application page component
-│ │ ├── full-report/page.tsx # Page for viewing all GSC data
-│ │ └── layout.tsx # Root layout
-│ ├── hooks/ # Custom React hooks (useReportConfig)
-│ ├── types/ # TypeScript type definitions (index.ts)
-│ ├── utils/ # Utility functions (dateUtils, numberFormatting, etc.)
-│ ├── styles/ # Global styles, Tailwind input
-│ ├── .env.local # Frontend environment variables (DO NOT COMMIT)
-│ ├── next.config.js # Next.js configuration (headers for COOP/COEP/CSP)
-│ ├── vercel.json # Vercel deployment configuration (headers)
-│ ├── tailwind.config.js # Tailwind configuration
-│ ├── tsconfig.json # TypeScript configuration
-│ └── package.json # Frontend dependencies
+│   ├── components/          # Reusable UI components
+│   │   └── ui/             # shadcn/ui components
+│   ├── public/             # Static assets
+│   │   └── image.png       # System architecture diagram
+│   ├── src/
+│   │   └── app/           # Next.js App Router structure
+│   │       ├── page.tsx   # Main application page
+│   │       ├── full-report/page.tsx
+│   │       └── layout.tsx # Root layout
+│   ├── hooks/             # Custom React hooks
+│   ├── types/             # TypeScript definitions
+│   ├── utils/             # Utility functions
+│   ├── styles/            # Global styles
+│   ├── .env.local         # Frontend environment variables
+│   ├── next.config.js     # Next.js configuration
+│   ├── vercel.json        # Vercel deployment config
+│   ├── tailwind.config.js # Tailwind configuration
+│   ├── tsconfig.json      # TypeScript configuration
+│   └── package.json       # Frontend dependencies
 ├── backend/
-│ ├── src/
-│ │ ├── controllers/ # Request handlers (auth, gsc, gemini)
-│ │ ├── routes/ # API route definitions (auth, gsc, gemini)
-│ │ ├── services/ # API client logic (gscService, geminiService)
-│ │ ├── utils/ # Utilities (cache, sleep)
-│ │ └── config/ # Configuration (db connection)
-│ ├── .env # Backend environment variables (DO NOT COMMIT)
-│ ├── server.js # Express server entry point
-│ └── package.json # Backend dependencies
-├── .gitignore # Files/folders to ignore in Git
-└── README.md # This file
+│   ├── src/
+│   │   ├── controllers/   # Request handlers
+│   │   ├── routes/       # API route definitions
+│   │   ├── services/     # API client logic
+│   │   ├── utils/        # Utilities
+│   │   └── config/       # Configuration
+│   ├── .env              # Backend environment variables
+│   ├── server.js         # Express server entry point
+│   └── package.json      # Backend dependencies
+├── .gitignore
+└── README.md             # Project documentation
+```
 
 ## Getting Started
 
