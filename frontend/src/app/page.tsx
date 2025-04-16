@@ -761,15 +761,33 @@ export default function Home() {
 
         if (!isAuthenticated) {
             return (
-                <Card>
-                    <CardHeader>
-                        <CardTitle>Welcome to Serprisingly</CardTitle>
-                        <CardDescription>Sign in to start building custom reports</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                        <AuthButton isAuthenticated={false} onLogout={async () => { }} isLoading={false} />
-                    </CardContent>
-                </Card>
+                <div className="flex items-center justify-center min-h-[calc(100vh-65px)] bg-gradient-to-br from-primary/5 to-background">
+                    <Card className="w-full max-w-md shadow-lg border-0 bg-white/80 backdrop-blur-sm">
+                        <CardHeader className="text-center space-y-3 pb-6">
+                            <div className="flex justify-center">
+                                <svg className="w-12 h-12 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                </svg>
+                            </div>
+                            <CardTitle className="text-2xl font-bold text-gray-800">Welcome to Serprisingly</CardTitle>
+                            <CardDescription className="text-gray-600 text-base">
+                                Build powerful, custom SEO reports with AI-driven insights
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent className="flex justify-center pb-8">
+                            <Button
+                                onClick={() => window.location.href = `${BACKEND_URL}/auth/google`}
+                                className="group relative inline-flex items-center justify-center px-6 py-3 text-base font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-all duration-300 shadow-md hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                <svg className="w-5 h-5 mr-2" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M12.545 10.239v3.821h5.445c-.712 2.315-2.647 3.972-5.445 3.972-3.332 0-6.033-2.701-6.033-6.032s2.701-6.032 6.033-6.032c1.498 0 2.866.547 3.921 1.449l2.814-2.814C17.503 2.988 15.139 2 12.545 2 6.735 2 2 6.735 2 12.545s4.735 10.545 10.545 10.545c5.257 0 9.621-3.948 10.414-9.015h-10.414v-3.836z" />
+                                </svg>
+                                Sign in with Google
+                                <span className="absolute inset-0 rounded-lg bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                            </Button>
+                        </CardContent>
+                    </Card>
+                </div>
             );
         }
 
