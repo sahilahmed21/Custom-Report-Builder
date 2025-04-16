@@ -25,21 +25,19 @@ const allowedOrigins = [
 ];
 
 // Ensure FRONTEND_URL is loaded correctly
-console.log(`CORS Config: Allowed Origins include FRONTEND_URL = ${process.env.FRONTEND_URL}`);
+const frontendUrl = process.env.FRONTEND_URL;
+console.log(`CORS Config: Allowing origin = ${frontendUrl}`); // Log the URL being used
+
+if (!frontendUrl) {
+    console.warn("WARNING: FRONTEND_URL environment variable not set. CORS might block deployed frontend.");
+}
 
 const corsOptions = {
-    origin: function (origin, callback) {
-        // Allow requests with no origin (like mobile apps, curl, server-to-server)
-        // OR allow if the origin is in our defined list
-        if (!origin || allowedOrigins.indexOf(origin) !== -1) {
-            // console.log(`CORS Success: Origin '${origin || 'N/A'}' allowed.`); // Can be noisy, enable if needed
-            callback(null, true);
-        } else {
-            console.error(`CORS Error: Origin '${origin}' not allowed.`); // Log denied origins
-            callback(new Error('Not allowed by CORS'));
-        }
-    },
-    credentials: true // Allow cookies/auth headers to be passed
+    // Directly use the environment variable.
+    // If it's missing, CORS might fail for the deployed app,
+    // but localhost might still work if the browser doesn't enforce CORS for it.
+    origin: frontendUrl,
+    credentials: true
 };
 
 // Apply CORS middleware *BEFORE* any routes
