@@ -9,6 +9,10 @@ const JOB_TTL_SECONDS = 60 * 60 * 2; // Keep job status for 2 hours
 // Store tokens
 export const storeTokens = async (tokens) => {
     const logPrefix = `storeTokens (Key: ${TOKEN_KEY}):`; // For easier log filtering
+    if (!redis) { // Add check for Redis client readiness
+        console.error(`${logPrefix} Redis client is not available! Cannot store tokens.`);
+        throw new Error("Redis connection unavailable during storeTokens.");
+    }
     try {
         console.log(`${logPrefix} Preparing to store tokens:`, tokens); // Log before stringify
         const tokensString = JSON.stringify(tokens);
@@ -30,57 +34,73 @@ export const storeTokens = async (tokens) => {
 
 // Retrieve tokens
 export const getTokens = async () => {
+    const logPrefix = `getTokens (Key: ${TOKEN_KEY}):`; // For easier log filtering
+    if (!redis) { // Add check for Redis client readiness
+        console.error(`${logPrefix} Redis client is not available! Cannot get tokens.`);
+        return null; // Return null if client not ready
+    }
     try {
+        console.log(`${logPrefix} Attempting redis.get...`); // ADDED LOG
         const retrievedValue = await redis.get(TOKEN_KEY);
+        // ---> THIS IS THE CRITICAL LOG <---
+        console.log(`${logPrefix} Raw value from redis.get:`, retrievedValue); // ADDED LOG
 
-        if (!retrievedValue) {
-            console.log(`No tokens found in cache for key: ${TOKEN_KEY}`);
+        if (retrievedValue === null || typeof retrievedValue === 'undefined') { // More robust check
+            console.log(`${logPrefix} No value found in cache (retrievedValue is null/undefined).`);
             return null;
         }
 
-        console.log(`Raw value retrieved for key ${TOKEN_KEY}:`, retrievedValue);
         const valueType = typeof retrievedValue;
-        console.log(`Type of retrieved value: ${valueType}`);
-        console.log(`getTokens: Raw value from redis.get:`, retrievedValue);
+        console.log(`${logPrefix} Type of retrieved value: ${valueType}`);
+
         let tokens;
         if (valueType === 'string') {
-            console.log('Retrieved value is a string, attempting JSON.parse...');
+            console.log(`${logPrefix} Retrieved value is a string, attempting JSON.parse...`);
             try {
                 tokens = JSON.parse(retrievedValue);
             } catch (parseError) {
-                console.error(`Failed to parse retrieved string: ${parseError}. String was:`, retrievedValue);
-                throw parseError;
+                console.error(`${logPrefix} Failed to parse retrieved string: ${parseError}. String was:`, retrievedValue);
+                // Optionally delete corrupted key
+                try { await redis.del(TOKEN_KEY); } catch (delErr) { console.error(`${logPrefix} Failed to delete corrupted key`, delErr); }
+                throw parseError; // Re-throw
             }
         } else if (valueType === 'object' && retrievedValue !== null) {
-            console.warn(
-                `Retrieved value is already an object (type: ${valueType}). Using directly. Check @upstash/redis client behavior.`
-            );
+            // This case might indicate an issue with how the client returns data or if data was stored differently.
+            console.warn(`${logPrefix} Retrieved value is already an object (type: ${valueType}). Using directly. Check @upstash/redis client behavior.`);
             tokens = retrievedValue;
         } else {
-            console.error(`Unexpected type ('${valueType}') retrieved from cache for key ${TOKEN_KEY}. Value:`, retrievedValue);
+            console.error(`${logPrefix} Unexpected type ('${valueType}') retrieved from cache. Value:`, retrievedValue);
             return null;
         }
 
-        if (!tokens || typeof tokens.access_token === 'undefined') {
-            console.error('Processed tokens object seems invalid:', tokens);
+        // Final validation of the parsed/retrieved token object
+        if (!tokens || typeof tokens.access_token === 'undefined' || tokens.access_token === null) {
+            console.error(`${logPrefix} Processed tokens object seems invalid or lacks access_token:`, tokens);
             return null;
         }
 
+        console.log(`${logPrefix} Successfully retrieved and processed tokens.`);
         return tokens;
     } catch (error) {
-        console.error(`Error retrieving/processing tokens for key ${TOKEN_KEY}:`, error);
-        return null;
+        console.error(`${logPrefix} CRITICAL ERROR during retrieval/processing:`, error);
+        return null; // Return null on any error during retrieval/processing
     }
 };
 
 // Clear tokens
 export const clearTokens = async () => {
+    const logPrefix = `clearTokens (Key: ${TOKEN_KEY}):`; // For easier log filtering
+    if (!redis) { // Add check for Redis client readiness
+        console.error(`${logPrefix} Redis client is not available! Cannot clear tokens.`);
+        throw new Error("Redis connection unavailable during clearTokens.");
+    }
     try {
+        console.log(`${logPrefix} Attempting redis.del...`);
         const result = await redis.del(TOKEN_KEY);
-        console.log(`Cleared tokens for key ${TOKEN_KEY}. Result: ${result}`);
+        console.log(`${logPrefix} redis.del command completed. Result (keys removed): ${result}`);
     } catch (error) {
-        console.error(`Error clearing tokens for key ${TOKEN_KEY}:`, error);
-        throw error;
+        console.error(`${logPrefix} Error during redis.del:`, error);
+        throw error; // Re-throw
     }
 };
 
@@ -95,23 +115,19 @@ export const getGeminiAnalysis = async (query) => {
     try {
         const cachedDataString = await redis.get(cacheKey);
         if (cachedDataString) {
-            console.log(`getGeminiAnalysis: Cache HIT for key: ${cacheKey}`);
+            // console.log(`getGeminiAnalysis: Cache HIT for key: ${cacheKey}`); // Reduce noise
             if (typeof cachedDataString === 'object') {
                 console.warn(`getGeminiAnalysis: Retrieved value is already an object for key ${cacheKey}. Using directly.`);
                 return cachedDataString;
             }
             return JSON.parse(cachedDataString);
         }
-        console.log(`getGeminiAnalysis: Cache MISS for key: ${cacheKey}`);
+        // console.log(`getGeminiAnalysis: Cache MISS for key: ${cacheKey}`); // Reduce noise
         return null;
     } catch (error) {
         console.error(`Error retrieving Gemini analysis from cache for key ${cacheKey}:`, error);
         if (error instanceof SyntaxError) {
-            try {
-                await redis.del(cacheKey);
-            } catch (delErr) {
-                console.error(`Failed to delete corrupted cache key ${cacheKey}`, delErr);
-            }
+            try { await redis.del(cacheKey); } catch (delErr) { console.error(`Failed to delete corrupted cache key ${cacheKey}`, delErr); }
         }
         return null;
     }
@@ -128,7 +144,7 @@ export const storeGeminiAnalysis = async (query, analysis) => {
     try {
         const analysisString = JSON.stringify(analysis);
         await redis.set(cacheKey, analysisString, { ex: GEMINI_CACHE_TTL_SECONDS });
-        console.log(`storeGeminiAnalysis: Stored analysis in cache for key: ${cacheKey}`);
+        // console.log(`storeGeminiAnalysis: Stored analysis in cache for key: ${cacheKey}`); // Reduce noise
     } catch (error) {
         console.error(`Error storing Gemini analysis in cache for key ${cacheKey}:`, error);
     }
@@ -165,7 +181,6 @@ export const incrementJobProgress = async (jobId) => {
     const key = `${JOB_STATUS_PREFIX}${jobId}`;
     try {
         await redis.hincrby(key, 'completed', 1);
-        // Optionally update an 'lastUpdateTime' field
     } catch (error) {
         console.error(`Error incrementing job progress for ${key}:`, error);
     }
@@ -189,7 +204,7 @@ export const finalizeJobStatus = async (jobId, finalStatus, errorMessage) => {
             updates.error = errorMessage;
         }
         await redis.hmset(key, updates);
-        await redis.expire(key, JOB_TTL_SECONDS);
+        await redis.expire(key, JOB_TTL_SECONDS); // Refresh TTL on finalization
         console.log(`Finalized job status for ${key} as ${finalStatus}`);
     } catch (error) {
         console.error(`Error finalizing job status for ${key}:`, error);
