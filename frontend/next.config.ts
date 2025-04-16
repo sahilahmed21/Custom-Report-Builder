@@ -32,7 +32,7 @@ const nextConfig = {
               "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
               // *** THIS IS THE KEY FIX ***
               // Allow connections (fetch/XHR/WebSockets) to self, the backend, Google APIs, and websockets for Next.js dev/HMR
-              `connect-src 'self' ${backendUrl} https://accounts.google.com https://www.googleapis.com https://generativelanguage.googleapis.com ws://${frontendUrl} wss://${frontendUrl}`,
+              `connect-src 'self' https://custom-report-builder.onrender.com https://accounts.google.com https://www.googleapis.com https://generativelanguage.googleapis.com ws://custom-report-builder.vercel.app wss://custom-report-builder.vercel.app`,
               // Allow framing from Google for Sign-in button
               "frame-src 'self' https://accounts.google.com",
             ].join('; '), // Join directives with a semicolon
