@@ -61,7 +61,7 @@ export default function FullReportPage() {
                 row.query?.toLowerCase().includes(debouncedFilter.toLowerCase())
             )
             : dataWithPlaceholders;
-        const totalPages = Math.ceil(filtered.length / rowsPerPage);
+        // const totalPages = Math.ceil(filtered.length / rowsPerPage);
         const startIndex = (currentPage - 1) * rowsPerPage;
         const endIndex = startIndex + rowsPerPage;
         return filtered.slice(startIndex, endIndex);
