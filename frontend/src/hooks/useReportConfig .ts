@@ -37,7 +37,7 @@ interface UseReportConfigReturn {
 }
 
 export function useReportConfig(): UseReportConfigReturn {
-    const [availableMetrics, setAvailableMetrics] = useState<Metric[]>(INITIAL_AVAILABLE_METRICS);
+    // const [availableMetrics, setAvailableMetrics] = useState<Metric[]>(INITIAL_AVAILABLE_METRICS);
     const [selectedMetrics, setSelectedMetrics] = useState<Metric[]>([]);
 
     const handleDragEnd = useCallback((event: DragEndEvent) => {

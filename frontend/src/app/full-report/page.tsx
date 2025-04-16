@@ -7,7 +7,7 @@ import { ReportTable } from '../../components/ReportTable'; // Reuse ReportTable
 import { Metric, DisplayRow } from '../../types';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft, Download } from 'lucide-react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
@@ -33,9 +33,9 @@ export default function FullReportPage() {
             } else {
                 setError("Full report data not found in storage. Please generate a report first.");
             }
-        } catch (e: any) {
+        } catch (e: unknown) {
             console.error("Error loading full report data:", e);
-            setError(`Failed to load report data: ${e.message}`);
+            setError(`Failed to load report data: ${e instanceof Error ? e.message : 'Unknown error'}`);
         } finally {
             setIsLoading(false);
         }
@@ -68,9 +68,10 @@ export default function FullReportPage() {
             ...visibleMetrics.map(m => ({ key: `${m.apiName}_${m.timePeriod}`, label: m.name })),
         ];
         const csvData = filteredData.map(row => {
-            const rowData: { [key: string]: any } = {};
+            const rowData: Record<string, string | number> = {};
             headers.forEach(header => {
-                rowData[header.label] = (row as any)[header.key] ?? '';
+                const value = row[header.key as keyof typeof row];
+                rowData[header.label] = typeof value === 'boolean' ? String(value) : (value ?? '');
             });
             return rowData;
         });

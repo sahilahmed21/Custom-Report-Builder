@@ -23,14 +23,14 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Progress } from '@/components/ui/progress';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { X, AlertCircle, Download, Settings2, BarChartHorizontalBig, Loader2, Filter, Search, ListChecks, Clock, BarChart3, FileSpreadsheet, Info, Globe } from 'lucide-react';
+import { X, AlertCircle, Download, Settings2, BarChartHorizontalBig, Loader2, Search, ListChecks, Clock, FileSpreadsheet, Info, Globe } from 'lucide-react';
 import { DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors, closestCenter, DragEndEvent } from '@dnd-kit/core';
 
 // Hooks & Utils
 import { useReportConfig } from '../hooks/useReportConfig ';
 import { getDateRange } from '../utils/dateUtils';
 import { Metric, GscProperty, ReportRow, DisplayRow } from '../types';
-import { formatNumber } from '../utils/numberFormatting';
+// import { formatNumber } from '../utils/numberFormatting';
 
 // --- Constants ---
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || '';
@@ -46,7 +46,54 @@ const GAPI_SHEETS_SCOPE = 'https://www.googleapis.com/auth/spreadsheets';
 // Add TypeScript declarations for GAPI
 declare global {
     interface Window {
-        gapi: any;
+        gapi: {
+            load: (service: string, callback: { callback: () => void; onerror: () => void; timeout: number; ontimeout: () => void; }) => void;
+            client: {
+                init: (config: Record<string, string>) => Promise<void>;
+                sheets: {
+                    spreadsheets: {
+                        create: (params: {
+                            resource: {
+                                properties: {
+                                    title: string;
+                                };
+                                sheets: Array<{
+                                    properties: {
+                                        title: string;
+                                        gridProperties: {
+                                            rowCount: number;
+                                            columnCount: number;
+                                        };
+                                    };
+                                }>;
+                            };
+                        }) => Promise<{
+                            result: {
+                                spreadsheetId: string;
+                                spreadsheetUrl: string;
+                            };
+                        }>;
+                        values: {
+                            update: (params: {
+                                spreadsheetId: string;
+                                range: string;
+                                valueInputOption: string;
+                                resource: {
+                                    values: any[][];
+                                };
+                            }) => Promise<any>;
+                        };
+                    };
+                };
+            };
+            auth2: {
+                getAuthInstance: () => {
+                    signIn: (options: { scope: string; prompt: string; }) => Promise<void>;
+                    isSignedIn: { get: () => boolean };
+                    currentUser: { get: () => { hasGrantedScopes: (scope: string) => boolean } };
+                };
+            };
+        };
     }
 }
 
@@ -61,7 +108,6 @@ export default function Home() {
     const [isClient, setIsClient] = useState(false);
     const [isGapiLoaded, setIsGapiLoaded] = useState(false);
     const [isGapiInitializing, setIsGapiInitializing] = useState(false);
-    const [isSheetsAuthorized, setIsSheetsAuthorized] = useState(false);
     const [isExportingSheet, setIsExportingSheet] = useState(false);
 
     // --- Report Generation States ---
@@ -289,7 +335,6 @@ export default function Home() {
                 if (googleAuth?.isSignedIn?.get() &&
                     googleAuth.currentUser?.get()?.hasGrantedScopes(GAPI_SHEETS_SCOPE)) {
                     console.log("Sheets scope already granted.");
-                    setIsSheetsAuthorized(true);
                 }
             } catch (error) {
                 console.error("Error loading GAPI:", error);
@@ -466,7 +511,7 @@ export default function Home() {
                     setReportError("Background analysis job failed to initialize.");
                 }
             }
-        } catch (error: unknown) {
+        } catch (error: Error | unknown) {
             console.error('Error during report generation process:', error);
             let message = 'An unknown error occurred.';
             if (error instanceof Error) {
@@ -573,7 +618,6 @@ export default function Home() {
                 if (!currentUser.hasGrantedScopes(GAPI_SHEETS_SCOPE)) {
                     throw new Error("Google Sheets permission not granted.");
                 }
-                setIsSheetsAuthorized(true);
             }
 
             console.log("User authorized for Sheets API.");
@@ -851,7 +895,7 @@ export default function Home() {
                                         value={jobProgress.total > 0 ? (jobProgress.completed / jobProgress.total) * 100 : 0}
                                         className="w-full mb-2 h-2"
                                     />
-                                    <p className="text-xs text-muted-foreground text-center">
+                                    <p className="text-sm text-muted-foreground text-center">
                                         {jobProgress.status === 'running'
                                             ? `Analyzing query ${jobProgress.completed} of ${jobProgress.total}...`
                                             : `Status: ${jobProgress.status}`}

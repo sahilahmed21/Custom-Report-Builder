@@ -2,7 +2,7 @@
 import React from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
-import { Badge } from '@/components/ui/badge';
+// import { Badge } from '@/components/ui/badge';
 import { GripVertical, MousePointerClick, Eye, BarChart, Trophy } from 'lucide-react';
 import { Metric } from '../types';
 
@@ -31,13 +31,13 @@ export const DraggableMetric: React.FC<DraggableMetricProps> = ({ id, metric, or
     };
 
     // Determine badge color based on metric type
-    const getBadgeVariant = () => {
-        if (metric.name.includes('Clicks')) return 'default';
-        if (metric.name.includes('Impressions')) return 'outline';
-        if (metric.name.includes('CTR')) return 'secondary';
-        if (metric.name.includes('Position')) return 'destructive';
-        return 'secondary';
-    };
+    // const getBadgeVariant = () => {
+    //     if (metric.name.includes('Clicks')) return 'default';
+    //     if (metric.name.includes('Impressions')) return 'outline';
+    //     if (metric.name.includes('CTR')) return 'secondary';
+    //     if (metric.name.includes('Position')) return 'destructive';
+    //     return 'secondary';
+    // };
 
     // Get icon based on metric type
     const getMetricIcon = () => {
