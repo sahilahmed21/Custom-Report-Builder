@@ -41,7 +41,7 @@ export const getTokens = async () => {
         console.log(`Raw value retrieved for key ${TOKEN_KEY}:`, retrievedValue);
         const valueType = typeof retrievedValue;
         console.log(`Type of retrieved value: ${valueType}`);
-
+        console.log(`getTokens: Raw value from redis.get:`, retrievedValue);
         let tokens;
         if (valueType === 'string') {
             console.log('Retrieved value is a string, attempting JSON.parse...');

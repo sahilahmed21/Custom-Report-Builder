@@ -189,7 +189,15 @@ export default function Home() {
         const checkAuth = async () => {
             setIsLoadingAuth(true);
             try {
-                const response = await fetch(`${BACKEND_URL}/auth/status`, { credentials: 'include' });
+                const response = await fetch(`${BACKEND_URL}/auth/status`, {
+                    method: 'GET', // Explicitly state GET
+                    credentials: 'include',
+                    cache: 'no-store', // Add this to prevent caching
+                    headers: { // Add cache-control headers
+                        'Cache-Control': 'no-cache, no-store, must-revalidate',
+                        'Pragma': 'no-cache',
+                        'Expires': '0',
+                    });
                 if (response.ok) {
                     const data = await response.json();
                     setIsAuthenticated(data.isAuthenticated);
@@ -341,7 +349,7 @@ export default function Home() {
                         callback: resolve,
                         onerror: reject,
                         timeout: 10000,
-                        ontimeout: reject
+                        ontimeout: reject,
                     });
                 });
                 await gapi.client.init({
