@@ -833,7 +833,7 @@ export default function Home() {
                                                             <DraggableMetric id={metric.id} metric={metric} origin="available" />
                                                         </div>
                                                     </TooltipTrigger>
-                                                    <TooltipContent side="bottom"><p>Drag to 'Selected Metrics'</p></TooltipContent>
+                                                    <TooltipContent side="bottom"><p>Drag to &apos Selected Metrics &apos</p></TooltipContent>
                                                 </Tooltip>
                                             </TooltipProvider>
                                         ))}
@@ -968,7 +968,7 @@ export default function Home() {
                             {!rawMergedGscData && !isLoadingReport && !isAnalyzingBackground && !reportError && (
                                 <Card className="border-dashed border-2 min-h-[400px] flex items-center justify-center">
                                     <CardContent className="p-6 text-center text-muted-foreground">
-                                        <p>Configure your report options on the left and click "Generate Report".</p>
+                                        <p>Configure your report options on the left and click &quot Generate Report &quot.</p>
                                     </CardContent>
                                 </Card>
                             )}
