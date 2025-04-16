@@ -49,10 +49,4 @@ app.use((err, req, res, next) => {
     }
 });
 // --- Server Start & Route Logging ---
-app.listen(port, () => {
-    console.log(`Backend server listening at http://localhost:${port}`);
-    console.log('Registered Routes:');
-    // Log all registered endpoints
-    console.log(listEndpoints(app));
-});
-
+app.listen(PORT, () => console.log(`Backend server listening at ${process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`}`));
