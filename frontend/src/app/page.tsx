@@ -1,4 +1,3 @@
-// frontend/src/app/page.tsx
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
@@ -30,7 +29,6 @@ import { DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors, close
 import { useReportConfig } from '../hooks/useReportConfig ';
 import { getDateRange } from '../utils/dateUtils';
 import { Metric, GscProperty, ReportRow, DisplayRow } from '../types';
-// import { formatNumber } from '../utils/numberFormatting';
 
 // --- Constants ---
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || '';
@@ -43,7 +41,7 @@ const GAPI_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '';
 const GAPI_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_API_KEY || '';
 const GAPI_SHEETS_SCOPE = 'https://www.googleapis.com/auth/spreadsheets';
 
-// Add TypeScript declarations for GAPI
+// --- GAPI Types ---
 declare global {
     interface Window {
         gapi: {
@@ -99,23 +97,13 @@ type GapiSpreadsheetResponse = {
     };
 };
 
-// type GapiError = {
-//     error: string;
-//     details?: string;
-// };
-
-// type FetchError = {
-//     message: string;
-//     status?: number;
-//     details?: string;
-// };
-
 type GapiErrorResponse = {
     error: string;
     details?: string;
     status?: number;
 };
 
+// --- Main Component ---
 export default function Home() {
     // --- Core States ---
     const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
@@ -154,16 +142,27 @@ export default function Home() {
 
     // --- Memoized Fetch Properties ---
     const fetchProperties = useCallback(async () => {
-        if (!isAuthenticated) return;
+        if (!isAuthenticated || !BACKEND_URL) return;
         setIsLoadingProperties(true);
         setPropertyError(null);
         try {
-            const response = await fetch(`${BACKEND_URL}/gsc/properties`, { credentials: 'include' });
+            console.log("Frontend: fetchProperties calling /gsc/properties...");
+            const response = await fetch(`${BACKEND_URL}/gsc/properties`, {
+                credentials: 'include',
+                cache: 'no-store',
+                headers: {
+                    'Cache-Control': 'no-cache, no-store, must-revalidate',
+                    'Pragma': 'no-cache',
+                    'Expires': '0',
+                }
+            });
+            console.log("Frontend: /gsc/properties response status:", response.status);
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({ error: `HTTP error ${response.status}` }));
                 throw new Error(errorData.error || 'Failed to fetch properties');
             }
             const data: GscProperty[] = await response.json();
+            console.log("Frontend: Received GSC Properties:", data);
             setGscProperties(data);
             if (data.length > 0 && !selectedProperty) {
                 setSelectedProperty(data[0].siteUrl);
@@ -171,8 +170,9 @@ export default function Home() {
                 setPropertyError("No GSC properties found for this account.");
             }
         } catch (error: unknown) {
-            console.error('Error fetching properties:', error);
-            setPropertyError(error instanceof Error ? error.message : 'Failed to load properties');
+            const message = error instanceof Error ? error.message : 'Failed to load properties';
+            console.error('Frontend: Error fetching properties:', message);
+            setPropertyError(message);
         } finally {
             setIsLoadingProperties(false);
         }
@@ -186,31 +186,61 @@ export default function Home() {
 
     // Auth Check
     useEffect(() => {
+        console.log("Frontend: Auth Check useEffect running.");
+        if (!BACKEND_URL) {
+            console.error("Frontend: BACKEND_URL is not set. Cannot check auth status.");
+            setIsLoadingAuth(false);
+            setIsAuthenticated(false);
+            return;
+        }
+
         const checkAuth = async () => {
             setIsLoadingAuth(true);
+            console.log("Frontend: checkAuth function started.");
             try {
-                const response = await fetch(`${BACKEND_URL}/auth/status`, { credentials: 'include' });
+                console.log(`Frontend: Calling fetch to ${BACKEND_URL}/auth/status...`);
+                const response = await fetch(`${BACKEND_URL}/auth/status`, {
+                    method: 'GET',
+                    credentials: 'include',
+                    cache: 'no-store',
+                    headers: {
+                        'Cache-Control': 'no-cache, no-store, must-revalidate',
+                        'Pragma': 'no-cache',
+                        'Expires': '0',
+                    }
+                });
+                console.log("Frontend: /auth/status fetch response status:", response.status);
                 if (response.ok) {
                     const data = await response.json();
+                    console.log("Frontend: /auth/status response data:", data);
                     setIsAuthenticated(data.isAuthenticated);
+                    console.log(`Frontend: Setting isAuthenticated state to: ${data.isAuthenticated}`);
                 } else {
+                    const errorText = await response.text().catch(() => 'Could not read error response body');
+                    console.error(`Frontend: /auth/status response not OK (${response.status}). Response text:`, errorText);
                     setIsAuthenticated(false);
+                    console.log("Frontend: Setting isAuthenticated state to: false (due to non-OK response)");
                 }
             } catch (error) {
-                console.error('Auth check fetch error:', error);
+                console.error('Frontend: Auth check fetch error:', error);
                 setIsAuthenticated(false);
+                console.log("Frontend: Setting isAuthenticated state to: false (due to fetch catch block)");
             } finally {
                 setIsLoadingAuth(false);
+                console.log("Frontend: checkAuth function finished. isLoadingAuth set to false.");
             }
         };
+
         checkAuth();
-    }, []); // Removed BACKEND_URL
+    }, []);
 
     // Properties & Reset on Auth Change
     useEffect(() => {
+        console.log("Frontend: Auth change/fetchProperties useEffect running. isAuthenticated:", isAuthenticated);
         if (isAuthenticated) {
             fetchProperties();
         } else {
+            console.log("Frontend: Resetting state due to !isAuthenticated.");
             setGscProperties([]);
             setSelectedProperty(null);
             setRawMergedGscData(null);
@@ -299,7 +329,6 @@ export default function Home() {
                 console.error(`[Job ${analysisJobId}] Error during polling:`, error);
                 setReportError(errorMessage || 'Error checking analysis progress');
                 shouldStopPolling = true;
-
             } finally {
                 if (shouldStopPolling) {
                     console.log(`[Job ${analysisJobId}] Stopping polling.`);
@@ -321,7 +350,7 @@ export default function Home() {
         };
     }, [analysisJobId, isAnalyzingBackground, topNQueryData]);
 
-    // Effect to load Google API Client Library (Client-Side Only)
+    // Effect to load Google API Client Library
     useEffect(() => {
         if (!isClient || isGapiLoaded || isGapiInitializing) {
             return;
@@ -380,11 +409,9 @@ export default function Home() {
 
     const handleDragEnd = (event: DragEndEvent) => handleDragEndFromHook(event);
 
-    // --- Main Report Generation Logic ---
     const handleGenerateReport = async () => {
         if (!selectedProperty || selectedMetrics.length === 0 || isLoadingReport || isAnalyzingBackground || !BACKEND_URL) return;
 
-        // Reset States
         setRawMergedGscData(null);
         setTopNQueryData([]);
         setAnalyzedResultsMap(new Map());
@@ -397,7 +424,6 @@ export default function Home() {
         if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
 
         try {
-            // Fetch and Merge GSC Data
             const uniqueTimePeriods = Array.from(new Set(selectedMetrics.map(m => m.timePeriod)));
             if (uniqueTimePeriods.length === 0) throw new Error("No time periods selected.");
 
@@ -426,7 +452,7 @@ export default function Home() {
 
             const results = await Promise.allSettled(fetchPromises);
             const mergedData = new Map<string, Partial<DisplayRow>>();
-            const fetchErrors: string[] = []; // Changed to const
+            const fetchErrors: string[] = [];
             results.forEach(result => {
                 if (result.status === 'fulfilled') {
                     const { timePeriod, data } = result.value;
@@ -456,31 +482,26 @@ export default function Home() {
                 return;
             }
 
-            // Filter, Rank, Select Top N
             setLoadingMessage('Processing data...');
             let allMergedDataArray = Array.from(mergedData.values());
 
-            // Apply Keyword Filter
             if (keywordFilter.trim()) {
                 const lowerKeyword = keywordFilter.trim().toLowerCase();
                 allMergedDataArray = allMergedDataArray.filter(item => item.query?.toLowerCase().includes(lowerKeyword));
             }
 
-            // Apply Min Clicks Filter (hardcoded to 1)
             const minClicks = 1;
             allMergedDataArray = allMergedDataArray.filter(item => {
                 const clicks = item['clicks_L28D'] ?? item['clicks_L3M'] ?? 0;
                 return (clicks as number) >= minClicks;
             });
 
-            // Rank by primary click metric
             allMergedDataArray.sort((a, b) => {
                 const clicksA = (a['clicks_L28D'] ?? a['clicks_L3M'] ?? 0) as number;
                 const clicksB = (b['clicks_L28D'] ?? b['clicks_L3M'] ?? 0) as number;
                 return clicksB - clicksA;
             });
 
-            // Select Top N
             const selectedTopN = parseInt(topNCount, 10) || parseInt(DEFAULT_TOP_N, 10);
             const topNDataSlice = allMergedDataArray.slice(0, selectedTopN);
             setTopNQueryData(topNDataSlice);
@@ -494,7 +515,6 @@ export default function Home() {
                 return;
             }
 
-            // Hybrid Gemini Analysis
             setLoadingMessage(`Analyzing initial ${Math.min(queriesForHybridAnalysis.length, IMMEDIATE_BATCH_SIZE)} queries...`);
             console.log(`Frontend: Sending ${queriesForHybridAnalysis.length} queries to /gemini/analyze-top-n-hybrid`);
 
@@ -545,7 +565,7 @@ export default function Home() {
             setIsAnalyzingBackground(false);
             setLoadingMessage('');
         }
-    };  // End of handleGenerateReport
+    };
 
     // --- Derived State for Display ---
     const displayData = useMemo((): DisplayRow[] => {
@@ -591,8 +611,6 @@ export default function Home() {
                 }
             });
             return rowData;
-
-
         });
 
         try {
@@ -621,7 +639,6 @@ export default function Home() {
         setReportError(null);
 
         try {
-            // Check if sheets API is available
             if (!window.gapi.client.sheets) {
                 console.log("Sheets API not available");
                 throw new Error("Google Sheets API not initialized properly");
@@ -672,7 +689,6 @@ export default function Home() {
                 return rowData;
             });
 
-            // Create the spreadsheet
             const resource = {
                 properties: {
                     title: `Serprisingly Report - ${selectedProperty} - ${new Date().toISOString().split('T')[0]}`
@@ -701,7 +717,6 @@ export default function Home() {
             const spreadsheetUrl = createResponse.result.spreadsheetUrl;
             console.log(`Spreadsheet created with ID: ${spreadsheetId}`);
 
-            // Update the spreadsheet with values
             const valueRange = {
                 values: [headers, ...values.map(row => row.map(cell => cell === null ? '' : cell))]
             };
@@ -766,7 +781,7 @@ export default function Home() {
                         <CardHeader className="text-center space-y-3 pb-6">
                             <div className="flex justify-center">
                                 <svg className="w-12 h-12 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2_\n2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2v12a2 2 0 002 2z" />
                                 </svg>
                             </div>
                             <CardTitle className="text-2xl font-bold text-gray-800">Welcome to Serprisingly</CardTitle>
@@ -794,21 +809,18 @@ export default function Home() {
         return (
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-                    {/* ===== LEFT SIDEBAR (Configuration) ===== */}
+                    {/* LEFT SIDEBAR (Configuration) */}
                     <div className="lg:col-span-2 space-y-6">
                         <Card className="shadow-sm sticky top-[80px]">
                             <CardHeader>
                                 <CardTitle className="text-lg font-semibold flex items-center gap-2"><Settings2 size={20} /> Report Builder</CardTitle>
                             </CardHeader>
                             <CardContent className="space-y-5">
-                                {/* 1. Property Selection */}
                                 <div>
                                     <h3 className="text-sm font-medium mb-1 text-muted-foreground">1. Select Property</h3>
                                     <PropertySelector properties={gscProperties} selectedProperty={selectedProperty} onSelectProperty={setSelectedProperty} isLoading={isLoadingProperties} error={propertyError} />
                                 </div>
                                 <Separator />
-
-                                {/* 2. Available Metrics */}
                                 <div>
                                     <h3 className="text-sm font-medium mb-1 text-muted-foreground">2. Available Metrics</h3>
                                     <CardDescription className="text-xs mb-2">Drag metrics to the area below</CardDescription>
@@ -821,7 +833,7 @@ export default function Home() {
                                                             <DraggableMetric id={metric.id} metric={metric} origin="available" />
                                                         </div>
                                                     </TooltipTrigger>
-                                                    <TooltipContent side="bottom"><p>Drag to &apos;Selected Metrics&apos;</p></TooltipContent>
+                                                    <TooltipContent side="bottom"><p>Drag to 'Selected Metrics'</p></TooltipContent>
                                                 </Tooltip>
                                             </TooltipProvider>
                                         ))}
@@ -829,8 +841,6 @@ export default function Home() {
                                     </div>
                                 </div>
                                 <Separator />
-
-                                {/* 3. Selected Metrics */}
                                 <div>
                                     <h3 className="text-sm font-medium mb-1 text-muted-foreground">3. Selected Metrics</h3>
                                     <DroppableArea id="selected-metrics-area" title="Report Columns">
@@ -855,8 +865,6 @@ export default function Home() {
                                     </DroppableArea>
                                 </div>
                                 <Separator />
-
-                                {/* 4. Analysis Options */}
                                 <div>
                                     <h3 className="text-sm font-medium mb-1 text-muted-foreground flex items-center gap-1"><ListChecks size={14} /> Analysis Options</h3>
                                     <div className="space-y-3 mt-2">
@@ -890,8 +898,6 @@ export default function Home() {
                                     </div>
                                 </div>
                                 <Separator />
-
-                                {/* 5. Generate */}
                                 <div>
                                     <Button
                                         className="w-full"
@@ -920,9 +926,8 @@ export default function Home() {
                         </Card>
                     </div>
 
-                    {/* ===== CENTER AREA (Report Table) ===== */}
+                    {/* CENTER AREA (Report Table) */}
                     <div className="lg:col-span-7 space-y-6">
-                        {/* Background Progress Indicator */}
                         {isAnalyzingBackground && jobProgress && (
                             <Card>
                                 <CardHeader className="pb-2 pt-4">
@@ -941,7 +946,6 @@ export default function Home() {
                                 </CardContent>
                             </Card>
                         )}
-                        {/* Global Report Error */}
                         {reportError && (
                             <Alert variant="destructive">
                                 <AlertCircle className="h-4 w-4" />
@@ -949,10 +953,7 @@ export default function Home() {
                                 <AlertDescription>{reportError}</AlertDescription>
                             </Alert>
                         )}
-
-                        {/* Report Results Section */}
                         <div className="mt-0">
-                            {/* Skeleton Loader */}
                             {isLoadingReport && !reportError && (
                                 <Card>
                                     <CardContent className="p-6">
@@ -961,27 +962,22 @@ export default function Home() {
                                     </CardContent>
                                 </Card>
                             )}
-
-                            {/* Render Table Section */}
                             {(topNQueryData.length > 0 || isAnalyzingBackground) && !isLoadingReport && (
                                 <ReportTable data={displayData} visibleMetrics={selectedMetrics} />
                             )}
-
-                            {/* Initial state message */}
                             {!rawMergedGscData && !isLoadingReport && !isAnalyzingBackground && !reportError && (
                                 <Card className="border-dashed border-2 min-h-[400px] flex items-center justify-center">
                                     <CardContent className="p-6 text-center text-muted-foreground">
-                                        <p>Configure your report options on the left and click &quot;Generate Report&quot;.</p>
+                                        <p>Configure your report options on the left and click "Generate Report".</p>
                                     </CardContent>
                                 </Card>
                             )}
                         </div>
                     </div>
 
-                    {/* ===== RIGHT SIDEBAR (Details & Actions) ===== */}
+                    {/* RIGHT SIDEBAR (Details & Actions) */}
                     <div className="lg:col-span-3 space-y-6">
                         <div className="sticky top-[80px] space-y-6">
-                            {/* Selected Property Info */}
                             <Card>
                                 <CardHeader className="pb-2 pt-4">
                                     <CardTitle className="text-base flex items-center gap-2"><Globe size={16} /> Selected Property</CardTitle>
@@ -994,13 +990,9 @@ export default function Home() {
                                     )}
                                 </CardContent>
                             </Card>
-
-                            {/* Analysis Trends */}
                             <Card>
                                 <CategoryDistributionChart data={displayData} />
                             </Card>
-
-                            {/* Export & View Actions */}
                             <Card>
                                 <CardHeader className="pb-2 pt-4">
                                     <CardTitle className="text-base flex items-center gap-2"><Download size={16} /> Actions</CardTitle>
