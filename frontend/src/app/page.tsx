@@ -807,7 +807,7 @@ export default function Home() {
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                     {/* LEFT SIDEBAR (Configuration) */}
-                    <div className="lg:col-span-4 space-y-6">
+                    <div className="lg:col-span-3 space-y-6">
                         <Card className="shadow-sm sticky top-[80px]">
                             <CardHeader>
                                 <CardTitle className="text-lg font-semibold flex items-center gap-2"><Settings2 size={20} /> Report Builder</CardTitle>
@@ -903,17 +903,17 @@ export default function Home() {
                                     >
                                         {isLoadingReport ? (
                                             <>
-                                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                                <Loader2 className="mr-2 h-0 w-2 animate-spin" />
                                                 {loadingMessage || 'Processing...'}
                                             </>
                                         ) : isAnalyzingBackground ? (
                                             <>
-                                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                                <Loader2 className="mr-2 h-0 w-2 animate-spin" />
                                                 Analyzing Background...
                                             </>
                                         ) : (
                                             <>
-                                                <BarChartHorizontalBig className="mr-2 h-0 w-4" />
+                                                <BarChartHorizontalBig className="mr-2 h-0 w-2" />
                                                 Generate Report
                                             </>
                                         )}
@@ -924,7 +924,7 @@ export default function Home() {
                     </div>
 
                     {/* CENTER AREA (Report Table) */}
-                    <div className="lg:col-span-7 space-y-6">
+                    <div className="lg:col-span-6 space-y-6">
                         {isAnalyzingBackground && jobProgress && (
                             <Card>
                                 <CardHeader className="pb-2 pt-4">
@@ -973,7 +973,7 @@ export default function Home() {
                     </div>
 
                     {/* RIGHT SIDEBAR (Details & Actions) */}
-                    <div className="lg:col-span-4 space-y-6">
+                    <div className="lg:col-span-3 space-y-6">
                         <div className="sticky top-[80px] space-y-6">
                             <Card>
                                 <CardHeader className="pb-2 pt-4">
