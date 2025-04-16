@@ -13,7 +13,7 @@ import { Input } from '@/components/ui/input';
 
 // Define specific header types
 type StaticHeaderConfig = {
-    key: 'query' | 'category' | 'geminiCategory' | 'geminiIntent';
+    key: 'query' | 'geminiCategory' | 'geminiIntent'; // Removed 'category'
     label: string;
     align: 'left' | 'right';
     isMetric: false;
@@ -54,11 +54,10 @@ export const ReportTable: React.FC<ReportTableProps> = ({ data, visibleMetrics }
         }));
         const staticHeaders: StaticHeaderConfig[] = [
             { key: 'query', label: 'Query', align: 'left', isMetric: false },
-            { key: 'category', label: 'Category', align: 'left', isMetric: false },
             { key: 'geminiCategory', label: 'Category (AI)', align: 'left', isMetric: false, sampled: true },
             { key: 'geminiIntent', label: 'Intent (AI)', align: 'left', isMetric: false, sampled: true },
         ];
-        return [staticHeaders[0], staticHeaders[1], ...dynamicHeaders, staticHeaders[2], staticHeaders[3]];
+        return [staticHeaders[0], ...dynamicHeaders, staticHeaders[1], staticHeaders[2]]; // Removed staticHeaders[1] ('category')
     }, [visibleMetrics]);
 
     const getFractionDigits = (apiName: string | undefined): number => {
@@ -240,8 +239,6 @@ export const ReportTable: React.FC<ReportTableProps> = ({ data, visibleMetrics }
                                                         <span className="tabular-nums">
                                                             {formatNumber(row[header.key] as number | undefined, getFractionDigits(header.apiName))}
                                                         </span>
-                                                    ) : header.key === 'category' ? (
-                                                        <span className="italic text-gray-400">N/A</span>
                                                     ) : header.key === 'geminiCategory' ? (
                                                         <Badge variant="outline" className="font-normal bg-slate-50">
                                                             {row.geminiCategory ?? '-'}
