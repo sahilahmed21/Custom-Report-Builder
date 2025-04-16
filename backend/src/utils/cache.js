@@ -1,4 +1,3 @@
-// backend/src/utils/cache.js
 import redis from '../config/db.js';
 
 const TOKEN_KEY = 'user_tokens';
@@ -9,13 +8,23 @@ const JOB_TTL_SECONDS = 60 * 60 * 2; // Keep job status for 2 hours
 
 // Store tokens
 export const storeTokens = async (tokens) => {
+    const logPrefix = `storeTokens (Key: ${TOKEN_KEY}):`; // For easier log filtering
     try {
+        console.log(`${logPrefix} Preparing to store tokens:`, tokens); // Log before stringify
         const tokensString = JSON.stringify(tokens);
-        await redis.set(TOKEN_KEY, tokensString);
-        console.log(`Tokens stored successfully under key: ${TOKEN_KEY}`);
+        console.log(`${logPrefix} Stringified tokens. Attempting redis.set...`); // Log before set
+        try {
+            await redis.set(TOKEN_KEY, tokensString);
+            console.log(`${logPrefix} redis.set command completed successfully.`); // Confirmation log
+        } catch (redisSetError) {
+            console.error(`${logPrefix} CRITICAL ERROR during redis.set:`, redisSetError);
+            throw redisSetError; // Re-throw to ensure the calling function knows it failed
+        }
+        // End inner try/catch
     } catch (error) {
-        console.error(`Error storing tokens under key ${TOKEN_KEY}:`, error);
-        throw error;
+        // This outer catch will now catch errors from stringify or the re-thrown redisSetError
+        console.error(`${logPrefix} Error during token storage process:`, error);
+        throw error; // Re-throw so oauthCallback knows about the failure
     }
 };
 
