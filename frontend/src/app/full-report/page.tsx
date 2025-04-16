@@ -1,9 +1,8 @@
-// frontend/src/app/full-report/page.tsx
 "use client";
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { ReportTable } from '../../components/ReportTable'; // Reuse ReportTable
+import { ReportTable } from '../../components/ReportTable';
 import { Metric, DisplayRow } from '../../types';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft, Download } from 'lucide-react';
@@ -13,6 +12,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
 import Papa from 'papaparse';
 import { saveAs } from 'file-saver';
+import { useDebounce } from '../../hooks/useDebounce'; // Assuming you have or will create this hook
 
 export default function FullReportPage() {
     const [fullData, setFullData] = useState<Partial<DisplayRow>[]>([]);
@@ -20,7 +20,12 @@ export default function FullReportPage() {
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [filter, setFilter] = useState('');
+    const [currentPage, setCurrentPage] = useState(1);
+    const rowsPerPage = 50; // Adjustable based on performance needs
     const router = useRouter();
+
+    // Debounce filter input
+    const debouncedFilter = useDebounce(filter);
 
     useEffect(() => {
         try {
@@ -41,33 +46,45 @@ export default function FullReportPage() {
         }
     }, []);
 
+    // Filter and paginate data
     const filteredData = useMemo(() => {
         if (!fullData) return [];
-        // Add gemini placeholders so ReportTable doesn't break
         const dataWithPlaceholders = fullData.map(row => ({
             ...row,
-            query: row.query as string, // Ensure query is string
+            query: row.query as string,
             geminiIntent: '-',
             geminiCategory: '-',
             isSampled: false,
         }));
-        if (!filter) return dataWithPlaceholders;
-        return dataWithPlaceholders.filter(row =>
-            row.query?.toLowerCase().includes(filter.toLowerCase())
-        );
-    }, [fullData, filter]);
+        const filtered = debouncedFilter
+            ? dataWithPlaceholders.filter(row =>
+                row.query?.toLowerCase().includes(debouncedFilter.toLowerCase())
+            )
+            : dataWithPlaceholders;
+        const totalPages = Math.ceil(filtered.length / rowsPerPage);
+        const startIndex = (currentPage - 1) * rowsPerPage;
+        const endIndex = startIndex + rowsPerPage;
+        return filtered.slice(startIndex, endIndex);
+    }, [fullData, debouncedFilter, currentPage, rowsPerPage]);
 
-    const handleExportFull = () => {
-        if (!filteredData || filteredData.length === 0) {
+    const totalPages = useMemo(() => {
+        if (!fullData) return 1;
+        const filteredCount = debouncedFilter
+            ? fullData.filter(row => row.query?.toLowerCase().includes(debouncedFilter.toLowerCase())).length
+            : fullData.length;
+        return Math.ceil(filteredCount / rowsPerPage);
+    }, [fullData, debouncedFilter, rowsPerPage]);
+
+    const handleExportFull = useCallback(() => {
+        if (!fullData || fullData.length === 0) {
             alert("No data available to export.");
             return;
         }
-        // Use only the relevant headers (exclude AI)
         const headers = [
             { key: 'query', label: 'Query' },
             ...visibleMetrics.map(m => ({ key: `${m.apiName}_${m.timePeriod}`, label: m.name })),
         ];
-        const csvData = filteredData.map(row => {
+        const csvData = fullData.map(row => {
             const rowData: Record<string, string | number> = {};
             headers.forEach(header => {
                 const value = row[header.key as keyof typeof row];
@@ -84,8 +101,51 @@ export default function FullReportPage() {
             console.error("Error generating CSV:", err);
             setError("Failed to generate CSV file.");
         }
+    }, [fullData, visibleMetrics]);
+
+    const handlePageChange = (page: number) => {
+        setCurrentPage(page);
+        setIsLoading(true); // Trigger loading state during page change
+        setTimeout(() => setIsLoading(false), 100); // Simulate loading delay
     };
 
+    // Render pagination
+    const renderPagination = () => {
+        const pageNumbers = Array.from({ length: totalPages }, (_, i) => i + 1);
+        return (
+            <div className="flex justify-center items-center gap-2 mt-4">
+                <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handlePageChange(currentPage - 1)}
+                    disabled={currentPage === 1}
+                >
+                    Previous
+                </Button>
+                {pageNumbers.map(number => (
+                    <Button
+                        key={number}
+                        variant={currentPage === number ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => handlePageChange(number)}
+                    >
+                        {number}
+                    </Button>
+                ))}
+                <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handlePageChange(currentPage + 1)}
+                    disabled={currentPage === totalPages}
+                >
+                    Next
+                </Button>
+                <span className="text-sm text-muted-foreground">
+                    Page {currentPage} of {totalPages} ({filteredData.length} of {fullData.length} rows)
+                </span>
+            </div>
+        );
+    };
 
     return (
         <div className="min-h-screen flex flex-col bg-muted/40">
@@ -100,7 +160,10 @@ export default function FullReportPage() {
                     <Card><CardContent className="p-6"><Skeleton className="h-64 w-full" /></CardContent></Card>
                 )}
                 {error && (
-                    <Alert variant="destructive"><AlertTitle>Error</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>
+                    <Alert variant="destructive">
+                        <AlertTitle>Error</AlertTitle>
+                        <AlertDescription>{error}</AlertDescription>
+                    </Alert>
                 )}
                 {!isLoading && !error && fullData.length > 0 && (
                     <div className="space-y-6">
@@ -111,16 +174,19 @@ export default function FullReportPage() {
                                 onChange={(e) => setFilter(e.target.value)}
                                 className="max-w-full sm:max-w-xs"
                             />
-                            <Button variant="outline" size="sm" onClick={handleExportFull} disabled={filteredData.length === 0}>
-                                <Download className="h-4 w-4 mr-2" /> Export Displayed (CSV)
+                            <Button variant="outline" size="sm" onClick={handleExportFull} disabled={fullData.length === 0}>
+                                <Download className="h-4 w-4 mr-2" /> Export All (CSV)
                             </Button>
                         </div>
-                        {/* Reuse ReportTable, AI columns will show '-' */}
                         <ReportTable data={filteredData} visibleMetrics={visibleMetrics} />
+                        {renderPagination()}
                     </div>
                 )}
                 {!isLoading && !error && fullData.length === 0 && (
-                    <Card><CardHeader><CardTitle>No Data</CardTitle></CardHeader><CardContent><p>No data was found in local storage. Please return to the builder and generate a report.</p></CardContent></Card>
+                    <Card>
+                        <CardHeader><CardTitle>No Data</CardTitle></CardHeader>
+                        <CardContent><p>No data was found in local storage. Please return to the builder and generate a report.</p></CardContent>
+                    </Card>
                 )}
             </main>
         </div>
