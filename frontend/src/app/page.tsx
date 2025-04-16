@@ -99,16 +99,16 @@ type GapiSpreadsheetResponse = {
     };
 };
 
-type GapiError = {
-    error: string;
-    details?: string;
-};
+// type GapiError = {
+//     error: string;
+//     details?: string;
+// };
 
-type FetchError = {
-    message: string;
-    status?: number;
-    details?: string;
-};
+// type FetchError = {
+//     message: string;
+//     status?: number;
+//     details?: string;
+// };
 
 type GapiErrorResponse = {
     error: string;
@@ -294,10 +294,12 @@ export default function Home() {
                         console.error(`[Job ${analysisJobId}] Failed to fetch results batch (${resultsResponse.status})`);
                     }
                 }
-            } catch (error: any) {
+            } catch (error: Error | unknown) {
+                const errorMessage = error instanceof Error ? error.message : 'Unknown error';
                 console.error(`[Job ${analysisJobId}] Error during polling:`, error);
-                setReportError(error.message || 'Error checking analysis progress');
+                setReportError(errorMessage || 'Error checking analysis progress');
                 shouldStopPolling = true;
+
             } finally {
                 if (shouldStopPolling) {
                     console.log(`[Job ${analysisJobId}] Stopping polling.`);
@@ -580,7 +582,7 @@ export default function Home() {
         ];
 
         const csvData = displayData.map(row => {
-            const rowData: { [key: string]: any } = {};
+            const rowData: Record<string, string | number | boolean | null> = {};
             headers.forEach(header => {
                 if (header.key === 'category') {
                     rowData[header.label] = 'N/A';
@@ -589,6 +591,8 @@ export default function Home() {
                 }
             });
             return rowData;
+
+
         });
 
         try {
