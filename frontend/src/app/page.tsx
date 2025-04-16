@@ -67,21 +67,16 @@ declare global {
                                     };
                                 }>;
                             };
-                        }) => Promise<{
-                            result: {
-                                spreadsheetId: string;
-                                spreadsheetUrl: string;
-                            };
-                        }>;
+                        }) => Promise<GapiSpreadsheetResponse>;
                         values: {
                             update: (params: {
                                 spreadsheetId: string;
                                 range: string;
                                 valueInputOption: string;
                                 resource: {
-                                    values: any[][];
+                                    values: Array<Array<string | number | null>>;
                                 };
-                            }) => Promise<any>;
+                            }) => Promise<unknown>;
                         };
                     };
                 };
@@ -96,6 +91,18 @@ declare global {
         };
     }
 }
+
+type GapiSpreadsheetResponse = {
+    result: {
+        spreadsheetId: string;
+        spreadsheetUrl: string;
+    };
+};
+
+type GapiError = {
+    error: string;
+    details?: string;
+};
 
 export default function Home() {
     // --- Core States ---
@@ -135,7 +142,7 @@ export default function Home() {
 
     // --- Memoized Fetch Properties ---
     const fetchProperties = useCallback(async () => {
-        if (!isAuthenticated || !BACKEND_URL) return;
+        if (!isAuthenticated) return;
         setIsLoadingProperties(true);
         setPropertyError(null);
         try {
@@ -151,13 +158,13 @@ export default function Home() {
             } else if (data.length === 0) {
                 setPropertyError("No GSC properties found for this account.");
             }
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('Error fetching properties:', error);
-            setPropertyError(error.message || 'Failed to load properties');
+            setPropertyError(error instanceof Error ? error.message : 'Failed to load properties');
         } finally {
             setIsLoadingProperties(false);
         }
-    }, [BACKEND_URL, isAuthenticated, selectedProperty]);
+    }, [isAuthenticated]);
 
     // --- Effects ---
     // Detect Client-Side Rendering
@@ -210,7 +217,7 @@ export default function Home() {
 
     // Polling Effect for Background Job
     useEffect(() => {
-        if (!analysisJobId || !isAnalyzingBackground || !BACKEND_URL) {
+        if (!analysisJobId || !isAnalyzingBackground) {
             if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
             return;
         }
@@ -298,7 +305,7 @@ export default function Home() {
                 console.log(`[Job ${analysisJobId}] Cleared polling interval on unmount/dependency change.`);
             }
         };
-    }, [analysisJobId, isAnalyzingBackground, BACKEND_URL, topNQueryData]);
+    }, [analysisJobId, isAnalyzingBackground, topNQueryData]);
 
     // Effect to load Google API Client Library (Client-Side Only)
     useEffect(() => {
@@ -598,10 +605,10 @@ export default function Home() {
         setReportError(null);
 
         try {
-            // Initialize sheets API first
+            // Check if sheets API is available
             if (!window.gapi.client.sheets) {
-                console.log("Loading sheets API...");
-                await window.gapi.client.load('sheets', 'v4');
+                console.log("Sheets API not available");
+                throw new Error("Google Sheets API not initialized properly");
             }
 
             const googleAuth = window.gapi.auth2.getAuthInstance();
@@ -699,16 +706,13 @@ export default function Home() {
             console.error("Error exporting to Google Sheets:", error);
             let message = "Failed to export to Google Sheets.";
             if (
-                typeof error === 'object' &&
-                error !== null &&
-                ('error' in error && (error as { error: string }).error === 'popup_closed_by_user' ||
-                    'details' in error && typeof (error as { details: string }).details === 'string' && (error as { details: string }).details.includes('access_denied'))
+                isGapiError(error) &&
+                (error.error === 'popup_closed_by_user' ||
+                    (error.details?.includes('access_denied')))
             ) {
                 message = "Google Sheets permission was denied.";
             } else if (error instanceof Error) {
                 message += ` ${error.message}`;
-            } else if (typeof error === 'object' && error !== null && 'details' in error && typeof (error as { details: string }).details === 'string') {
-                message += ` ${(error as { details: string }).details}`;
             }
             setReportError(message);
         } finally {
@@ -933,7 +937,7 @@ export default function Home() {
                             {!rawMergedGscData && !isLoadingReport && !isAnalyzingBackground && !reportError && (
                                 <Card className="border-dashed border-2 min-h-[400px] flex items-center justify-center">
                                     <CardContent className="p-6 text-center text-muted-foreground">
-                                        <p>Configure your report options on the left and click "Generate Report".</p>
+                                        <p>Configure your report options on the left and click &quot;Generate Report&quot;.</p>
                                     </CardContent>
                                 </Card>
                             )}
@@ -1024,9 +1028,17 @@ export default function Home() {
                     {renderMainContent()}
                 </main>
                 <footer className="mt-12 p-4 text-center text-muted-foreground text-xs border-t bg-background">
-                    Powered by Next.js, Node.js, GSC API, and Gemini API
+                    Powered by Serprisingly
                 </footer>
             </div>
         </TooltipProvider>
+    );
+}
+
+function isGapiError(error: unknown): error is GapiError {
+    return (
+        typeof error === 'object' &&
+        error !== null &&
+        ('error' in error || 'details' in error)
     );
 }
